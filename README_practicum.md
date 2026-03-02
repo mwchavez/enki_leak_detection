@@ -22,23 +22,22 @@ ESP32 Sensors (Edge Devices)
         │
         │  MQTT over TLS (port 8883)
         ▼
-  AWS IoT Core  ──────────────────────────────────────┐
-  (MQTT Broker + Rules Engine)                        │
-        │                                             │
-        │  IoT Rule → DynamoDB                        │ 
-        ▼                                             |
-   DynamoDB                                           |  
- (Raw sensor storage)                                 |
-                                                      │
-                                          ┌───────────┴───────────┐
-                                          ▼                       ▼
-                                   SNS / Email Alert       CloudWatch
-                                   (< 5 sec latency)       (Monitoring
-                                                            & Logs)
-                                                            │
-                                                            ▼
-                                                    Web Dashboard
-                                                  (Live Visualization)
+  AWS IoT Core
+  (MQTT Broker + Rules Engine)
+        │
+        │  IoT Rule → DynamoDB
+        ▼
+   DynamoDB
+ (Raw sensor storage)
+        │
+        │  DynamoDB Streams → CloudWatch Metrics
+        ▼
+   CloudWatch
+ (Threshold alerting, monitoring & logs)
+        │
+        ▼
+  SNS / Email Alert          Web Dashboard
+  (< 5 sec latency)        (Live Visualization)
 ```
 
 ### Why Each Service Was Chosen
@@ -47,8 +46,8 @@ ESP32 Sensors (Edge Devices)
 |---|---|---|
 | **IoT Core** | MQTT broker & device gateway | Managed service; handles device auth with certificates so we don't have to build our own broker |
 | **DynamoDB** | Raw sensor data storage | NoSQL, scales automatically, fast writes for high-frequency sensor data |
-| **SNS** | Alert notifications | Delivers email/SMS alerts when thresholds are exceeded |
-| **CloudWatch** | Monitoring & logging | Tracks system health, Lambda errors, pipeline performance |
+| **CloudWatch** | Threshold alerting, monitoring & logs | Native AWS monitoring tool; configurable metric alarms eliminate the need for custom processing code in this controlled environment |
+| **SNS** | Alert notifications | Delivers email/SMS alerts when CloudWatch thresholds are exceeded |
 
 ---
 
@@ -79,7 +78,7 @@ Each IoT device publishes JSON payloads to AWS IoT Core on the topic `leaksense/
 
 ## 🚨 Alert Logic
 
-The Lambda processing function evaluates each incoming event against threshold rules:
+CloudWatch Metric Alarms evaluate sensor data against threshold rules and trigger SNS notifications when conditions are met:
 
 | Condition | Threshold | Action |
 |---|---|---|
@@ -99,7 +98,7 @@ practicum-leak-detection/
 ├── iot-core/
 │   ├── device-certs/          # Certificate files for ESP32 auth (not committed — see .gitignore)
 │   ├── thing-policy.json      # AWS IoT Core device policy definition
-│   └── iot-rules.json         # Rules Engine configuration (DynamoDB + Lambda routing)
+│   └── iot-rules.json         # Rules Engine configuration (DynamoDB routing)
 │
 ├── dynamodb/
 │   └── table-schema.json      # DynamoDB table definition and key structure
@@ -125,8 +124,9 @@ practicum-leak-detection/
 - [x] DynamoDB table configured with correct key schema
 - [x] IoT Rules Engine routing MQTT → DynamoDB
 - [x] End-to-end MQTT → IoT Core → DynamoDB pipeline tested
+- [ ] CloudWatch metric alarms configured for threshold detection
 - [ ] SNS alert delivery integration
-- [ ] CloudWatch monitoring and dashboards
+- [ ] CloudWatch dashboards
 - [ ] Web visualization dashboard
 - [ ] Integration with Engineering team's physical sensor dataset
 
