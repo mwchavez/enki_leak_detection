@@ -63,7 +63,6 @@ Each IoT device publishes JSON payloads to AWS IoT Core on the topic `leaksense/
   "temperature": 21.3,
   "vibration": 0.12,
   "acoustic": 340.5,
-  "location": "bathroom-sink"
 }
 ```
 
