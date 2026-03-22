@@ -45,14 +45,15 @@ A portable handheld device with onboard sensors and a TensorFlow Lite model runs
 │     (MQTT Broker + Rules Engine)                                │
 │           │                                                     │
 │           │  IoT Topic Rule                                     │
-│           ▼                                                     │
-│      DynamoDB                                                   │
-│      (Raw sensor storage)                                       │
-│           │                                                     │
-│           │  CloudWatch Metric Alarms                           │
-│           ▼                                                     │
-│     CloudWatch ──────► SNS Email Alert                          │
-│     (Threshold monitoring)                                      │
+│           ├──────────────────────────┐                          │
+│           │                          │                          │
+│           ▼                          ▼                          │
+│      DynamoDB                 CloudWatch Metrics                 │
+│   (Raw sensor storage)     (Custom metric namespace)            │
+│                                      │                          │
+│                                      │  Metric Alarms           │
+│                                      ▼                          │
+│                               SNS Email Alert                   │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 
