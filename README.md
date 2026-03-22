@@ -174,9 +174,9 @@ enki-leak-detection/
 - [x] IAM Role for IoT → DynamoDB write permissions
 - [x] End-to-end MQTT → IoT Core → DynamoDB pipeline tested
 - [x] SNS Topic with email subscription
-- [ ] Infrastructure defined as code with AWS CDK (Python)
-- [ ] CloudWatch metric alarms for threshold detection
-- [ ] CloudWatch dashboard for monitoring
+- [x] Infrastructure defined as code with AWS CDK (Python)
+- [x] CloudWatch metric alarms for threshold detection
+- [x] CloudWatch dashboard for monitoring
 
 ### Hardware & Sensors (Andres, Carolina)
 - [x] Sensor data sheets compiled
