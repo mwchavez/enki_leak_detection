@@ -3,11 +3,19 @@ import os
 
 import aws_cdk as cdk
 
-from leak_detection_practicum.leak_detection_practicum_stack import LeakDetectionPracticumStack
-
-
+from leak_detection_stack.leak_detection_stack import LeakDetectionPracticumStack
+node_names = ["node01", "node02"]
 app = cdk.App()
 LeakDetectionPracticumStack(app, "LeakDetectionPracticumStack",
+    node_names=node_names,
+
+    
+
+
+    
+    
+    
+    
     # If you don't specify 'env', this stack will be environment-agnostic.
     # Account/Region-dependent features and context lookups will not work,
     # but a single synthesized template can be deployed anywhere.
@@ -23,6 +31,6 @@ LeakDetectionPracticumStack(app, "LeakDetectionPracticumStack",
     #env=cdk.Environment(account='123456789012', region='us-east-1'),
 
     # For more information, see https://docs.aws.amazon.com/cdk/latest/guide/environments.html
-    )
+)
 
 app.synth()
