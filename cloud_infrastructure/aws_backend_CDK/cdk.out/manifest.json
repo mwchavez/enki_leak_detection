@@ -18,7 +18,7 @@
         "validateOnSynth": false,
         "assumeRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-deploy-role-${AWS::AccountId}-${AWS::Region}",
         "cloudFormationExecutionRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-cfn-exec-role-${AWS::AccountId}-${AWS::Region}",
-        "stackTemplateAssetObjectUrl": "s3://cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}/21f0f351c73bf3c3bee29c9f7120fcb5e00ed087d1be3168947a0bfb8e9e3abc.json",
+        "stackTemplateAssetObjectUrl": "s3://cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}/823531784ff36bcd4e1e057abc32a84074da60450cf38b03d61a4df0291c96d2.json",
         "requiresBootstrapStackVersion": 6,
         "bootstrapStackVersionSsmParameter": "/cdk-bootstrap/hnb659fds/version",
         "additionalDependencies": [
@@ -33,32 +33,7 @@
       "dependencies": [
         "LeakDetectionPracticumStack.assets"
       ],
-      "metadata": {
-        "/LeakDetectionPracticumStack/CDKMetadata/Default": [
-          {
-            "type": "aws:cdk:logicalId",
-            "data": "CDKMetadata"
-          }
-        ],
-        "/LeakDetectionPracticumStack/CDKMetadata/Condition": [
-          {
-            "type": "aws:cdk:logicalId",
-            "data": "CDKMetadataAvailable"
-          }
-        ],
-        "/LeakDetectionPracticumStack/BootstrapVersion": [
-          {
-            "type": "aws:cdk:logicalId",
-            "data": "BootstrapVersion"
-          }
-        ],
-        "/LeakDetectionPracticumStack/CheckBootstrapVersion": [
-          {
-            "type": "aws:cdk:logicalId",
-            "data": "CheckBootstrapVersion"
-          }
-        ]
-      },
+      "additionalMetadataFile": "LeakDetectionPracticumStack.metadata.json",
       "displayName": "LeakDetectionPracticumStack"
     },
     "Tree": {
