@@ -190,7 +190,7 @@ enki-leak-detection/
 - [x] Fake dataset generator for training
 - [x] TFLite model trained and exported
 - [x] Normalization parameters saved (norm_mu.csv, norm_sigma.csv)
-- [ ] Embedded AI deployment on ESP32-S3
+- [x] Embedded AI deployment on ESP32-S3
 - [ ] Handheld integration and field testing
 
 ---
