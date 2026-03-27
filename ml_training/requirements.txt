@@ -1,0 +1,6 @@
+numpy>=1.26,<2.1
+pandas>=2.2,<3
+scikit-learn>=1.5,<2
+tensorflow==2.18.0
+matplotlib>=3.8,<4
+jupyter>=1.1,<2
