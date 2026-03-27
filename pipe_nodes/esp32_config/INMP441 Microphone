@@ -1,18 +1,26 @@
 #include <driver/i2s.h>
 
-#define I2S_WS   25   // LRCL
-#define I2S_SD   33   // DOUT
-#define I2S_SCK  26   // BCLK
+#define I2S_WS 25
+#define I2S_SD 33
+#define I2S_SCK 26
 
 #define I2S_PORT I2S_NUM_0
 
 #define SAMPLE_BUFFER_SIZE 512
 int32_t samples[SAMPLE_BUFFER_SIZE];
 
+// Running stats (per second)
+long long runningSum = 0;
+long sampleCount = 0;
+
+// Timing
+unsigned long windowStart = 0;
+const unsigned long WINDOW_DURATION = 1000; // 1 second
+
 void setup() {
   Serial.begin(115200);
 
-  // I2S configuration
+  // I2S config
   i2s_config_t i2s_config = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
     .sample_rate = 16000,
@@ -25,7 +33,6 @@ void setup() {
     .use_apll = false
   };
 
-  // Pin configuration
   i2s_pin_config_t pin_config = {
     .bck_io_num = I2S_SCK,
     .ws_io_num = I2S_WS,
@@ -33,10 +40,11 @@ void setup() {
     .data_in_num = I2S_SD
   };
 
-  // Install driver
   i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
   i2s_set_pin(I2S_PORT, &pin_config);
   i2s_zero_dma_buffer(I2S_PORT);
+
+  windowStart = millis();
 
   Serial.println("INMP441 ready...");
 }
@@ -44,23 +52,55 @@ void setup() {
 void loop() {
   size_t bytes_read;
 
-  // Read samples from mic
+  // Read mic data
   i2s_read(I2S_PORT, (void*)samples, sizeof(samples), &bytes_read, portMAX_DELAY);
 
-  int num_samples = bytes_read / 4; // 4 bytes per sample (32-bit)
+  int num_samples = bytes_read / 4;
 
   long sum = 0;
 
-  // Convert + compute amplitude
+  // Process samples
   for (int i = 0; i < num_samples; i++) {
-    int32_t sample = samples[i] >> 14;  // convert 24-bit to usable range
+    int32_t sample = samples[i] >> 14;
     sum += abs(sample);
   }
 
-  // Average volume level
   int avg = sum / num_samples;
 
+  // Accumulate for this 1-second window
+  runningSum += avg;
+  sampleCount++;
+
+  // Debug (optional)
   Serial.println(avg);
 
-  delay(50);
+  // Check if 1 second passed
+  if (millis() - windowStart >= WINDOW_DURATION) {
+
+    if (sampleCount > 0) {
+      long secondAvg = runningSum / sampleCount;
+
+      // Timestamp at publish time
+      unsigned long timestamp = millis();
+
+      // Build JSON payload
+      String payload = "{";
+      payload += "\"timestamp\":" + String(timestamp) + ",";
+      payload += "\"avg_sound\":" + String(secondAvg);
+      payload += "}";
+
+      Serial.println("Publishing:");
+      Serial.println(payload);
+
+      // 🔴 Add your MQTT publish here
+      // client.publish("your/topic", payload.c_str());
+    }
+
+    // Reset for next second
+    runningSum = 0;
+    sampleCount = 0;
+    windowStart = millis();
+  }
+
+  delay(50); // ~20 Hz sampling
 }
