@@ -14,7 +14,7 @@ from aws_cdk import (
 )
 from constructs import Construct
 
-class LeakDetectionPracticumStack(Stack):
+class LeakDetectionStack(Stack):
 
     def __init__(self, scope: Construct, construct_id: str, node_names: list[str], **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -118,7 +118,7 @@ class LeakDetectionPracticumStack(Stack):
             actions = ["cloudwatch:PutMetricData"],
             resources = ["*"]
         ))
-
+    
        #IoT Topic Rule
         iot_storage_topic_rule = iot.CfnTopicRule(self, "LeakDetectionTopicRule",
             topic_rule_payload = iot.CfnTopicRule.TopicRulePayloadProperty(
@@ -135,7 +135,7 @@ class LeakDetectionPracticumStack(Stack):
 
                     iot.CfnTopicRule.ActionProperty(
                         cloudwatch_metric = iot.CfnTopicRule.CloudwatchMetricActionProperty(
-                            metric_name = "moisture",
+                            metric_name = "${device_id}_moisture",
                             metric_namespace = "Enki/LeakDetection",
                             metric_unit = "Percent",
                             metric_value = "${moisture}",
@@ -145,7 +145,7 @@ class LeakDetectionPracticumStack(Stack):
 
                     iot.CfnTopicRule.ActionProperty(
                         cloudwatch_metric = iot.CfnTopicRule.CloudwatchMetricActionProperty(
-                            metric_name = "temperature",
+                            metric_name = "${device_id}_temperature",
                             metric_namespace = "Enki/LeakDetection",
                             metric_unit = "None",
                             metric_value = "${temperature}",
@@ -155,7 +155,7 @@ class LeakDetectionPracticumStack(Stack):
 
                     iot.CfnTopicRule.ActionProperty(
                         cloudwatch_metric = iot.CfnTopicRule.CloudwatchMetricActionProperty(
-                            metric_name = "vibration",
+                            metric_name = "${device_id}_vibration",
                             metric_namespace = "Enki/LeakDetection",
                             metric_unit = "None",
                             metric_value = "${vibration}",
@@ -165,10 +165,20 @@ class LeakDetectionPracticumStack(Stack):
 
                     iot.CfnTopicRule.ActionProperty(
                         cloudwatch_metric = iot.CfnTopicRule.CloudwatchMetricActionProperty(
-                            metric_name = "acoustic",
+                            metric_name = "${device_id}_acoustic",
                             metric_namespace = "Enki/LeakDetection",
                             metric_unit = "None",
                             metric_value = "${acoustic}",
+                            role_arn = put_metrics_to_cw.role_arn
+                        )
+                    ),
+
+                    iot.CfnTopicRule.ActionProperty(
+                        cloudwatch_metric = iot.CfnTopicRule.CloudwatchMetricActionProperty(
+                            metric_name = "${device_id}_confidence_score",
+                            metric_namespace = "Enki/LeakDetection",
+                            metric_unit = "None",
+                            metric_value = "${confidence_score}",
                             role_arn = put_metrics_to_cw.role_arn
                         )
                     )
@@ -191,82 +201,142 @@ class LeakDetectionPracticumStack(Stack):
         leak_alert_topic.add_subscription(
             sub.EmailSubscription(email_01.value_as_string)
         )
-      
-        #Assign CloudWatch metrics to the custom metric namespace
-        moisture_metric = cloudwatch.Metric(
-            namespace = "Enki/LeakDetection",
-            metric_name = "moisture"
-        )
         
-        temperature_metric = cloudwatch.Metric(
-            namespace = "Enki/LeakDetection",
-            metric_name = "temperature"
-        )
         
-        acoustic_metric = cloudwatch.Metric(
-            namespace = "Enki/LeakDetection",
-            metric_name = "acoustic"
-        )
+        #Create a dictionary to create and store the CloudWatch metrics for each node
+        metrics_by_node = {}
+        for node_name in node_names:
+            metrics_by_node[node_name] = {
+                "moisture": cloudwatch.Metric(
+                    namespace = "Enki/LeakDetection",
+                    metric_name = f"{node_name}_moisture"
+                ),
+                
+                "temperature": cloudwatch.Metric(
+                    namespace = "Enki/LeakDetection",
+                    metric_name = f"{node_name}_temperature"
+                ),
+                
+                "acoustic": cloudwatch.Metric(
+                    namespace = "Enki/LeakDetection",
+                    metric_name = f"{node_name}_acoustic"
+                ),
 
-        vibration_metric = cloudwatch.Metric(
-            namespace = "Enki/LeakDetection",
-            metric_name = "vibration"
-        )
+                "vibration": cloudwatch.Metric(
+                    namespace = "Enki/LeakDetection",
+                    metric_name = f"{node_name}_vibration"
+                ),
+                "confidence_score": cloudwatch.Metric(
+                    namespace = "Enki/LeakDetection",
+                    metric_name = f"{node_name}_confidence_score"
+                )
 
-       #Create Cloudwatch alarms to alert if data falls out of a certain threshold
-        moisture_alarm = cloudwatch.Alarm(self, "Alarm for High Moisture",
-            metric = moisture_metric,
-            threshold = 80,
-            evaluation_periods=3
-        )
+            }
+
+       #Create Cloudwatch alarms to alert if data falls out of a certain threshold for each node
+        alarms_by_node = {}
+        for node_name in node_names:
+            moisture_alarm = cloudwatch.Alarm(self, f"Alarm for High Moisture {node_name}",
+                metric = metrics_by_node[node_name]["moisture"],
+                threshold = 80,
+                evaluation_periods = 3
+            )
+            moisture_alarm.add_alarm_action(cw_actions.SnsAction(leak_alert_topic))
+
+            temperature_alarm = cloudwatch.Alarm(self, f"Alarm for Temperature Spike {node_name}",
+                metric = metrics_by_node[node_name]["temperature"],
+                threshold = 18,
+                evaluation_periods = 3
+            )
+            temperature_alarm.add_alarm_action(cw_actions.SnsAction(leak_alert_topic))
+
+            acoustic_alarm = cloudwatch.Alarm(self, f"Alarm for Acoustic Anomaly {node_name}",
+                metric = metrics_by_node[node_name]["acoustic"],
+                threshold = 500,
+                evaluation_periods = 3
+            )
+            acoustic_alarm.add_alarm_action(cw_actions.SnsAction(leak_alert_topic))
+
+            vibration_alarm = cloudwatch.Alarm(self, f"Alarm for Vibration Anomaly {node_name}",
+                metric = metrics_by_node[node_name]["vibration"],
+                threshold = 0.3,
+                evaluation_periods = 3
+            )
+            vibration_alarm.add_alarm_action(cw_actions.SnsAction(leak_alert_topic))
+
+            confidence_score_alarm = cloudwatch.Alarm(self, f"Alarm for Confidence Score {node_name}",
+                metric = metrics_by_node[node_name]["confidence_score"],
+                threshold = 0.5,
+                evaluation_periods = 3
+            )
+            confidence_score_alarm.add_alarm_action(cw_actions.SnsAction(leak_alert_topic))
+            
+            alarms_by_node[node_name] = {
+                "moisture": moisture_alarm,
+                "temperature": temperature_alarm,
+                "acoustic": acoustic_alarm,
+                "vibration": vibration_alarm,
+                "confidence_score": confidence_score_alarm,
+            }
         
-        temperature_alarm = cloudwatch.Alarm(self, "Alarm for Temperature Spike",
-            metric = temperature_metric,
-            threshold = 18, 
-            evaluation_periods = 3
-        )
-
-        acoustic_alarm = cloudwatch.Alarm(self,"Alarm for Acoustic Anomaly",
-            metric = acoustic_metric,
-            threshold = 500,
-            evaluation_periods = 3
-        )
-
-        vibration_alarm = cloudwatch.Alarm(self, "Alarm for Vibration Anomaly",
-            metric = vibration_metric,
-            threshold = 0.3,
-            evaluation_periods = 3
-        )
-
-        #Connect the CloudWatch alarms to the SNS topic
-        moisture_alarm.add_alarm_action(cw_actions.SnsAction(leak_alert_topic))
-        temperature_alarm.add_alarm_action(cw_actions.SnsAction(leak_alert_topic))
-        acoustic_alarm.add_alarm_action(cw_actions.SnsAction(leak_alert_topic))
-        vibration_alarm.add_alarm_action(cw_actions.SnsAction(leak_alert_topic))
-
        #Create a Cloudwatch dashboard to visualize the data in the CloudWatch Metrics
         dashboard = cloudwatch.Dashboard(self, 'LeadDetectDash',
             dashboard_name = "Leak_Detection_Dashboard"
         )
 
+        #Add widgets to the dashboard for each node
+        for node_name in node_names:
+            dashboard.add_widgets(
+                cloudwatch.TextWidget(
+                    markdown = f"# {node_name}"
+                )
+            )
+            dashboard.add_widgets(
+                cloudwatch.GraphWidget(
+                    title = f"{node_name}_moisture",
+                    left = [metrics_by_node[node_name]["moisture"]]
+                ),
+                cloudwatch.GraphWidget(
+                    title = f"{node_name}_temperature",
+                    left = [metrics_by_node[node_name]["temperature"]]
+                ),
+                cloudwatch.GraphWidget(
+                    title = f"{node_name}_acoustic",
+                    left = [metrics_by_node[node_name]["acoustic"]]
+                ),
+                cloudwatch.GraphWidget(
+                    title = f"{node_name}_vibration",
+                    left = [metrics_by_node[node_name]["vibration"]]
+                ),
+    
+            )
+        
+        #Create a Composite Alarm for cross validation
+        composite_alarms = []
+        for node_name in node_names:
+            alarm_rule = cloudwatch.AlarmRule.all_of(
+                    cloudwatch.AlarmRule.any_of(
+                        alarms_by_node[node_name]["moisture"],
+                        alarms_by_node[node_name]["temperature"],
+                        alarms_by_node[node_name]["acoustic"],
+                        alarms_by_node[node_name]["vibration"],
+                    ),
+                    alarms_by_node[node_name]["confidence_score"]
+                
+            )
+            composite_alarm = cloudwatch.CompositeAlarm(self, f"LeakDetectionCompositeAlarm{node_name}",
+                composite_alarm_name = f"LeakDetectionCompositeAlarm_{node_name}",
+                alarm_rule = alarm_rule
+            )
+            composite_alarm.add_alarm_action(cw_actions.SnsAction(leak_alert_topic))
+            composite_alarms.append(composite_alarm)
+
+        #Add a widget to the dashboard for the composite alarms
         dashboard.add_widgets(
-            cloudwatch.GraphWidget(
-                title = "Moisture Monitoring",
-                left = [moisture_metric]
-            ),
-
-            cloudwatch.GraphWidget(
-                title = "Temperature Monitoring",
-                left = [temperature_metric]
-            ),
-
-            cloudwatch.GraphWidget(
-                title = "Acoustic Monitoring",
-                left = [acoustic_metric]
-            ),
-
-            cloudwatch.GraphWidget(
-                title = "Vibration",
-                left = [vibration_metric]
+            cloudwatch.AlarmStatusWidget(
+                title = "System Status",
+                alarms = composite_alarms
             )
         )
+
+
