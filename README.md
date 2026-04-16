@@ -130,6 +130,7 @@ Each fixed node publishes JSON payloads via MQTT to the topic pattern leaksensor
 | `temperature` | Number | Ambient temperature in Celsius |
 | `vibration` | Number | Vibration intensity (g-force units) |
 | `acoustic` | Number | Sound frequency in Hz (pipe resonance detection) |
+| `confidence_score` | Number | ML model confidence score in leak / no leak |
 
 ---
 
