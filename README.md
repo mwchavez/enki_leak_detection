@@ -113,8 +113,13 @@ Each fixed node publishes JSON payloads via MQTT to the topic pattern `leaksenso
   "moisture": 72.4,
   "temperature": 21.3,
   "vibration": 0.12,
-  "acoustic": 340.5
+  "acoustic": 340.5,
+  "confidence_score": 0.67
 }
+
+Each fixed node publishes JSON payloads via MQTT to the topic pattern leaksensor/node-XX/data:
+
+
 ```
 
 | Field | Type | Description |

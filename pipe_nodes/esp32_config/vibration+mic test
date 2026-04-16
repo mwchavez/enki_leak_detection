@@ -1,0 +1,220 @@
+#include <Arduino.h>
+#include <math.h>
+#include <driver/i2s.h>
+
+
+#define VIBRATION_PIN 27
+#define PIEZO_HIT_THRESHOLD 140
+#define PIEZO_BASELINE_ALPHA 0.01f
+#define PIEZO_BASELINE_UPDATE_LIMIT 40
+#define PIEZO_SAMPLE_BURST 8
+#define PIEZO_HOLD_MS 250
+
+#define I2S_WS_PIN 25
+#define I2S_SCK_PIN 26
+#define I2S_SD_PIN 33
+
+#define I2S_PORT I2S_NUM_0
+#define SAMPLE_RATE 16000
+#define WINDOW_SAMPLES 128
+
+#define MIC_SOUND_THRESHOLD 2000.0f
+#define MIC_HOLD_MS 250
+#define PRINT_INTERVAL_MS 150
+
+static int32_t raw_samples[WINDOW_SAMPLES];
+static int16_t audio_i16[WINDOW_SAMPLES];
+
+unsigned long lastPrintMs = 0;
+unsigned long micHoldUntilMs = 0;
+unsigned long piezoHoldUntilMs = 0;
+
+int piezoBaseline = 0;
+bool piezoBaselineReady = false;
+int piezoLastRaw = 0;
+int piezoLastDelta = 0;
+unsigned long piezoHitCount = 0;
+
+void setupMic() {
+  const i2s_config_t i2s_config = {
+    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
+    .sample_rate = SAMPLE_RATE,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
+    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+    .communication_format = I2S_COMM_FORMAT_I2S,
+    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+    .dma_buf_count = 4,
+    .dma_buf_len = 256,
+    .use_apll = false,
+    .tx_desc_auto_clear = false,
+    .fixed_mclk = 0
+  };
+
+  const i2s_pin_config_t pin_config = {
+    .bck_io_num = I2S_SCK_PIN,
+    .ws_io_num = I2S_WS_PIN,
+    .data_out_num = I2S_PIN_NO_CHANGE,
+    .data_in_num = I2S_SD_PIN
+  };
+
+  i2s_driver_install(I2S_PORT, &i2s_config, 0, nullptr);
+  i2s_set_pin(I2S_PORT, &pin_config);
+  i2s_zero_dma_buffer(I2S_PORT);
+}
+
+bool readMicWindow() {
+  size_t bytes_read = 0;
+  esp_err_t result = i2s_read(
+    I2S_PORT,
+    raw_samples,
+    sizeof(raw_samples),
+    &bytes_read,
+    portMAX_DELAY
+  );
+
+  if (result != ESP_OK || bytes_read != sizeof(raw_samples)) {
+    return false;
+  }
+
+  long long sum = 0;
+  for (int i = 0; i < WINDOW_SAMPLES; i++) {
+    sum += raw_samples[i];
+  }
+
+  int32_t mean = (int32_t)(sum / WINDOW_SAMPLES);
+
+  for (int i = 0; i < WINDOW_SAMPLES; i++) {
+    int32_t centered = raw_samples[i] - mean;
+    int32_t shifted = centered >> 8;
+
+    if (shifted > 32767) shifted = 32767;
+    if (shifted < -32768) shifted = -32768;
+
+    audio_i16[i] = (int16_t)shifted;
+  }
+
+  return true;
+}
+
+float computeRms(const int16_t* audio) {
+  double sum_sq = 0.0;
+  for (int i = 0; i < WINDOW_SAMPLES; i++) {
+    double value = (double)audio[i];
+    sum_sq += value * value;
+  }
+  return (float)sqrt(sum_sq / WINDOW_SAMPLES + 1e-12);
+}
+
+void updatePiezoState() {
+  int localPeakDelta = 0;
+  int localLastRaw = 0;
+
+  for (int i = 0; i < PIEZO_SAMPLE_BURST; i++) {
+    int raw = analogRead(VIBRATION_PIN);
+    localLastRaw = raw;
+
+    if (!piezoBaselineReady) {
+      piezoBaseline = raw;
+      piezoBaselineReady = true;
+    }
+
+    int delta = abs(raw - piezoBaseline);
+    if (delta > localPeakDelta) {
+      localPeakDelta = delta;
+    }
+
+    if (delta <= PIEZO_BASELINE_UPDATE_LIMIT) {
+      piezoBaseline =
+        (int)((1.0f - PIEZO_BASELINE_ALPHA) * piezoBaseline +
+              PIEZO_BASELINE_ALPHA * raw);
+    }
+  }
+
+  piezoLastRaw = localLastRaw;
+  piezoLastDelta = localPeakDelta;
+
+  if (localPeakDelta >= PIEZO_HIT_THRESHOLD) {
+    piezoHoldUntilMs = millis() + PIEZO_HOLD_MS;
+    piezoHitCount++;
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  pinMode(VIBRATION_PIN, INPUT_PULLDOWN);
+#if defined(ESP32)
+  analogReadResolution(12);
+#endif
+  piezoLastRaw = analogRead(VIBRATION_PIN);
+  piezoBaseline = piezoLastRaw;
+  piezoBaselineReady = true;
+
+  setupMic();
+
+  Serial.println("Mic + piezo sensor test ready");
+  Serial.println("Fields: SoundLevel MicActive PiezoRaw PiezoDelta PiezoHit PiezoHits State");
+  Serial.println();
+}
+
+void loop() {
+  if (!readMicWindow()) {
+    Serial.println("Mic read failed");
+    delay(20);
+    return;
+  }
+
+  float soundLevel = computeRms(audio_i16);
+  updatePiezoState();
+
+  if (soundLevel >= MIC_SOUND_THRESHOLD) {
+    micHoldUntilMs = millis() + MIC_HOLD_MS;
+  }
+
+  bool micActive = millis() < micHoldUntilMs;
+  bool piezoHit = piezoLastDelta >= PIEZO_HIT_THRESHOLD;
+  bool piezoActive = millis() < piezoHoldUntilMs;
+
+  if (millis() - lastPrintMs >= PRINT_INTERVAL_MS) {
+    const char* state = "IDLE";
+    if (micActive && piezoActive) {
+      state = "BOTH";
+    } else if (micActive) {
+      state = "MIC";
+    } else if (piezoActive) {
+      state = "PIEZO";
+    }
+
+    Serial.print("SoundLevel:");
+    Serial.print(soundLevel, 2);
+    Serial.print("\t");
+
+    Serial.print("MicActive:");
+    Serial.print(micActive ? 1 : 0);
+    Serial.print("\t");
+
+    Serial.print("PiezoRaw:");
+    Serial.print(piezoLastRaw);
+    Serial.print("\t");
+
+    Serial.print("PiezoDelta:");
+    Serial.print(piezoLastDelta);
+    Serial.print("\t");
+
+    Serial.print("PiezoHit:");
+    Serial.print(piezoHit ? 1 : 0);
+    Serial.print("\t");
+
+    Serial.print("PiezoHits:");
+    Serial.print(piezoHitCount);
+    Serial.print("\t");
+
+    Serial.print("State:");
+    Serial.println(state);
+
+    lastPrintMs = millis();
+  }
+
+  delay(5);
+}
