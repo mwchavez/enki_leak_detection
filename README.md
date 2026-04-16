@@ -183,6 +183,8 @@ enki-leak-detection/
 - [x] Infrastructure defined as code with AWS CDK (Python)
 - [x] CloudWatch metric alarms for threshold detection
 - [x] CloudWatch dashboard for monitoring
+- [ ] Dashboard App Concept
+- [ ] Refinement
 
 ### Hardware & Sensors (Andres, Carolina)
 - [x] Sensor data sheets compiled
@@ -191,6 +193,7 @@ enki-leak-detection/
 - [ ] Fixed pipe node prototype assembly
 - [ ] Handheld device CAD design (in progress)
 - [ ] Handheld device assembly
+- [ ] Refinement
 
 ### ML Model (Ethan)
 - [x] Fake dataset generator for training
@@ -198,6 +201,7 @@ enki-leak-detection/
 - [x] Normalization parameters saved (norm_mu.csv, norm_sigma.csv)
 - [x] Embedded AI deployment on ESP32-S3
 - [ ] Handheld integration and field testing
+- [ ] Refinement
 
 ---
 
