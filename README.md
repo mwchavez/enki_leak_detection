@@ -104,7 +104,7 @@ A portable handheld device with onboard sensors and a TensorFlow Lite model runs
 
 ## 📡 Sensor Data Schema
 
-Each fixed node publishes JSON payloads via MQTT to the topic pattern `leaksensor/node-XX/data`:
+Each fixed node publishes JSON payloads via MQTT to the topic pattern `leaksensor/nodeXX/data`:
 
 ```json
 {
