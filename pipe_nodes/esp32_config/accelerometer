@@ -1,0 +1,26 @@
+// GY-61 (ADXL335) Analog Pins
+#define X_PIN 32
+#define Y_PIN 33
+#define Z_PIN 25
+
+void setup() {
+  Serial.begin(115200);
+
+  // Set ADC resolution (ESP32 default is 12-bit: 0–4095)
+  analogReadResolution(12);
+
+  // Optional: improve accuracy
+  analogSetAttenuation(ADC_11db); // allows full 0–3.3V range
+}
+
+void loop() {
+  int xRaw = analogRead(X_PIN);
+  int yRaw = analogRead(Y_PIN);
+  int zRaw = analogRead(Z_PIN);
+
+  Serial.print("X: "); Serial.print(xRaw);
+  Serial.print(" | Y: "); Serial.print(yRaw);
+  Serial.print(" | Z: "); Serial.println(zRaw);
+
+  delay(200);
+}
