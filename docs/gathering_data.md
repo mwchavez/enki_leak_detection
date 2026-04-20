@@ -37,9 +37,6 @@ Updated architecture:
 **Rationale (retroactive):**
 Running ML on every node and cross-validating against thresholds in the cloud provides a better detection story than either approach alone. It also justifies keeping both systems — thresholds are debuggable and fast; ML captures multi-modal correlations that thresholds cannot.
 
-**Process note:**
-This change was made without full team consensus. Going forward, architectural changes that affect the cloud layer should include the cloud lead in the decision.
-
 ### What the Cloud Layer Does Now
 - Ingests 4 metrics + confidence score per node per second via MQTT
 - Routes to DynamoDB for historical record
