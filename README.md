@@ -154,9 +154,10 @@ CloudWatch Metric Alarms evaluate incoming sensor data against threshold rules a
 ```
 enki-leak-detection/
 ├── cloud_infrastructure/        # AWS CDK stack (Python)
-│   ├── leak_detection_practicum_stack.py
+│   ├── aws_backend_CDK/
 │   ├── docs/
-│        ├── Architecture.md 
+│        ├── Architecture.md
+│        ├── gathering_data.md
 ├── ml_training/                 # ML model training & dataset generation
 │   ├── train_fusion_model.py
 │   ├── generate_fake_dataset.py
@@ -165,6 +166,8 @@ enki-leak-detection/
 │   └── norm_sigma.csv
 ├── pipe_nodes/                  # (Planned) ESP32 firmware for fixed sensor nodes
 ├── handheld_device/             # (Planned) ESP32 firmware + TFLite for handheld
+├── wiki/
+│   ├── Debugging-and-Logs.md
 └── README.md
 ```
 
