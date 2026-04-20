@@ -194,7 +194,7 @@ enki-leak-detection/
 - [x] Bill of materials finalized
 - [x] ESP32 WiFi connection and MQTT data transfer tested
 - [ ] Fixed pipe node prototype assembly
-- [ ] Handheld device CAD design (in progress)
+- [x] Handheld device CAD design (in progress)
 - [ ] Handheld device assembly
 - [ ] Refinement
 
@@ -203,7 +203,7 @@ enki-leak-detection/
 - [x] TFLite model trained and exported
 - [x] Normalization parameters saved (norm_mu.csv, norm_sigma.csv)
 - [x] Embedded AI deployment on ESP32-S3
-- [ ] Handheld integration and field testing
+- [x] Handheld integration and field testing
 - [ ] Refinement
 
 ---
