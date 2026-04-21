@@ -186,7 +186,7 @@ enki-leak-detection/
 - [x] Infrastructure defined as code with AWS CDK (Python)
 - [x] CloudWatch metric alarms for threshold detection
 - [x] CloudWatch dashboard for monitoring
-- [ ] Dashboard App Concept
+- [x] Dashboard App Concept
 - [ ] Refinement
 
 ### Hardware & Sensors (Andres, Carolina)
