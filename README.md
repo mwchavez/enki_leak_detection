@@ -193,9 +193,9 @@ enki-leak-detection/
 - [x] Sensor data sheets compiled
 - [x] Bill of materials finalized
 - [x] ESP32 WiFi connection and MQTT data transfer tested
-- [ ] Fixed pipe node prototype assembly
+- [x] Fixed pipe node prototype assembly
 - [x] Handheld device CAD design (in progress)
-- [ ] Handheld device assembly
+- [x] Handheld device assembly
 - [ ] Refinement
 
 ### ML Model (Ethan)
