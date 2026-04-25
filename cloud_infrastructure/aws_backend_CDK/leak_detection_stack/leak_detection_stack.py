@@ -14,7 +14,7 @@ from aws_cdk import (
 )
 from constructs import Construct
 
-class LeakDetectionStack(Stack):
+class LeakDetectionPracticumStack(Stack):
 
     def __init__(self, scope: Construct, construct_id: str, node_names: list[str], **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -238,35 +238,35 @@ class LeakDetectionStack(Stack):
         for node_name in node_names:
             moisture_alarm = cloudwatch.Alarm(self, f"Alarm for High Moisture {node_name}",
                 metric = metrics_by_node[node_name]["moisture"],
-                threshold = 80,
+                threshold = 55,
                 evaluation_periods = 3
             )
             moisture_alarm.add_alarm_action(cw_actions.SnsAction(leak_alert_topic))
 
             temperature_alarm = cloudwatch.Alarm(self, f"Alarm for Temperature Spike {node_name}",
                 metric = metrics_by_node[node_name]["temperature"],
-                threshold = 18,
+                threshold = 26,
                 evaluation_periods = 3
             )
             temperature_alarm.add_alarm_action(cw_actions.SnsAction(leak_alert_topic))
 
             acoustic_alarm = cloudwatch.Alarm(self, f"Alarm for Acoustic Anomaly {node_name}",
                 metric = metrics_by_node[node_name]["acoustic"],
-                threshold = 500,
+                threshold = 29500,
                 evaluation_periods = 3
             )
             acoustic_alarm.add_alarm_action(cw_actions.SnsAction(leak_alert_topic))
 
             vibration_alarm = cloudwatch.Alarm(self, f"Alarm for Vibration Anomaly {node_name}",
                 metric = metrics_by_node[node_name]["vibration"],
-                threshold = 0.3,
+                threshold = 900,
                 evaluation_periods = 3
             )
             vibration_alarm.add_alarm_action(cw_actions.SnsAction(leak_alert_topic))
 
             confidence_score_alarm = cloudwatch.Alarm(self, f"Alarm for Confidence Score {node_name}",
                 metric = metrics_by_node[node_name]["confidence_score"],
-                threshold = 0.5,
+                threshold = 0.8,
                 evaluation_periods = 3
             )
             confidence_score_alarm.add_alarm_action(cw_actions.SnsAction(leak_alert_topic))
