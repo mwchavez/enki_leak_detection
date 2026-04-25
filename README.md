@@ -14,7 +14,7 @@
 | Moses Chavez | Cloud Infrastructure & DevOps | [@mwchavez](https://github.com/mwchavez) |
 | Andres Varela | Hardware & Sensor Integration | [@Avarela314](https://github.com/Avarela314) |
 | Ethan Garcia | ML Model Development & Training | [@shamumonky](https://github.com/shamumonky) |
-| Carolina Flores | Hardware Design & Documentation | [@CarolinaFUIW26](https://github.com/CarolinaFUIW26) |
+| Carolina Flores | Team Leader & Hardware Design | [@CarolinaFUIW26](https://github.com/CarolinaFUIW26) |
 
 ---
 
