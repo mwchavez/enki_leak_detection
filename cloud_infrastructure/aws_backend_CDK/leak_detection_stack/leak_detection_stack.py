@@ -245,7 +245,7 @@ class LeakDetectionPracticumStack(Stack):
 
             temperature_alarm = cloudwatch.Alarm(self, f"Alarm for Temperature Spike {node_name}",
                 metric = metrics_by_node[node_name]["temperature"],
-                threshold = 26,
+                threshold = 29,
                 evaluation_periods = 3
             )
             temperature_alarm.add_alarm_action(cw_actions.SnsAction(leak_alert_topic))
@@ -266,7 +266,7 @@ class LeakDetectionPracticumStack(Stack):
 
             confidence_score_alarm = cloudwatch.Alarm(self, f"Alarm for Confidence Score {node_name}",
                 metric = metrics_by_node[node_name]["confidence_score"],
-                threshold = 0.8,
+                threshold = 0.2,
                 evaluation_periods = 3
             )
             confidence_score_alarm.add_alarm_action(cw_actions.SnsAction(leak_alert_topic))
