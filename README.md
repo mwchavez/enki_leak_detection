@@ -1,9 +1,9 @@
 # Enki — Hybrid Multi-Modal Leak Detection System
 **ENGR 4380 - Senior Design 2 / CSEC 4390 – Practicum | Spring 2026**  
-**Faculty Advisor:** Dr. Okan Caglayan & Dr. Gonzalo Parra  
+**Faculty Advisors:** Dr. Okan Caglayan & Dr. Gonzalo Parra  
 **Course:** Engineering & Cybersecurity Systems
 
-> A leak detection alert system using cross-integration of microcontrollers for data collection, cloud computing for alerts and monitoring, and machine learning for standalone edge inference on a handheld device.
+> A leak detection alert system using cross-integration of microcontrollers for data collection, cloud computing for alerts and monitoring, and machine learning running on every node — both fixed sensor units and a standalone handheld inspection device.
 
 ---
 
@@ -14,65 +14,97 @@
 | Moses Chavez | Cloud Infrastructure & DevOps | [@mwchavez](https://github.com/mwchavez) |
 | Andres Varela | Hardware & Sensor Integration | [@Avarela314](https://github.com/Avarela314) |
 | Ethan Garcia | ML Model Development & Training | [@shamumonky](https://github.com/shamumonky) |
-| Carolina Flores | Hardware Design & Documentation | [@CarolinaFUIW26](https://github.com/CarolinaFUIW26) |
+| Carolina Flores | Team Leader & Hardware Design | [@CarolinaFUIW26](https://github.com/CarolinaFUIW26) |
+
+---
+
+## 🔗 Quick Links
+
+- 📖 **[Full Documentation (Wiki)](../../wiki)** — Architecture decisions, debugging guides, and final report
+- 📋 **[Project Board](../../projects)** — Milestone tracking and Story Point ledger
+- 🎬 **Demo Video** — *(link pending)*
 
 ---
 
 ## 🏗️ System Overview
 
-Enki is a hybrid leak detection system with **two independent detection paths** designed to work together:
+Enki is a leak detection system that combines **distributed continuous monitoring** with **on-demand handheld inspection**. Every node — fixed or portable — runs a TensorFlow Lite leak classification model directly on its ESP32, and the cloud layer cross-validates the model's confidence with rule-based threshold alarms.
 
-**Path 1 — Distributed Monitoring (Cloud)**  
-Fixed sensor nodes attached to pipes collect environmental readings and transmit them to AWS via MQTT. The cloud pipeline stores the data, evaluates it against threshold rules, and sends email alerts when anomalies are detected.
+**Distributed Monitoring (Fixed Nodes)**  
+Sensor nodes clamped to pipes run on-device inference and publish four sensor readings plus the model's confidence score to AWS at ~1 Hz. The cloud pipeline ingests, stores, and evaluates the data through a composite alarm that fires only when both a threshold breach and the ML model agree — reducing false positives over either signal alone.
 
-**Path 2 — Handheld Inspection (Edge ML)**  
-A portable handheld device with onboard sensors and a TensorFlow Lite model runs inference directly on the ESP32. A technician holds the device against a pipe and receives an immediate "Leak" or "No Leak" result on the LCD screen — no cloud connection required.
+**Handheld Inspection (Standalone)**  
+A portable ESP32 device shares the exact same firmware logic as the fixed nodes, minus WiFi and AWS connectivity. A technician holds the device against a pipe, the model runs locally, and the LCD displays "Leak" or "No Leak." No cloud connection required — useful for inspecting pipes that aren't covered by fixed sensors.
 
 ---
 
 ## 🔀 Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    PATH 1: DISTRIBUTED MONITORING               │
-│                                                                 │
-│   Fixed Sensor Nodes (ESP32-S3)                                 │
-│   [SHTC3] [MPU6050] [INMP441] [HC-SR04]                        │
-│           │                                                     │
-│           │  MQTT over TLS (port 8883)                          │
-│           ▼                                                     │
-│     AWS IoT Core                                                │
-│     (MQTT Broker + Rules Engine)                                │
-│           │                                                     │
-│           │  IoT Topic Rule                                     │
-│           ├──────────────────────────┐                          │
-│           │                          │                          │
-│           ▼                          ▼                          │
-│      DynamoDB                 CloudWatch Metrics                 │
-│   (Raw sensor storage)     (Custom metric namespace)            │
-│                                      │                          │
-│                                      │  Metric Alarms           │
-│                                      ▼                          │
-│                               SNS Email Alert                   │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────┐
-│                    PATH 2: HANDHELD INSPECTION                  │
-│                                                                 │
-│   Handheld Device (ESP32-S3)                                    │
-│   [SHTC3] [MPU6050] [INMP441] [HC-SR04]                        │
-│           │                                                     │
-│           │  Onboard Inference                                  │
-│           ▼                                                     │
-│     TensorFlow Lite Model                                       │
-│     (leak_fusion_model.tflite)                                  │
-│           │                                                     │
-│           ▼                                                     │
-│     LCD Display: "Leak" / "No Leak"                             │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐  ┌─────────────────────────────────────┐
+│           DISTRIBUTED MONITORING (Fixed Nodes)                 │  │   HANDHELD INSPECTION (Standalone)  │
+│                                                                │  │                                     │
+│   Fixed Sensor Nodes (ESP32-S3)                                │  │   Handheld Device (ESP32-S3)        │
+│   [BME680] [ADXL335] [INMP441]                                 │  │   [BME680] [ADXL335] [INMP441]      │
+│            │                                                   │  │            │                        │
+│            │  On-device TFLite inference                       │  │            │  On-device TFLite      │
+│            │  → 4 sensor values + confidence_score             │  │            ▼                        │
+│            │                                                   │  │      LCD Display:                   │
+│            │  MQTT over TLS (port 8883)                        │  │      "Leak" / "No Leak"             │
+│            ▼                                                   │  │                                     │
+│      AWS IoT Core (MQTT broker + Rules Engine)                 │  │   No WiFi, no cloud — fully offline │
+│            │                                                   │  │                                     │
+│            ├──────────────────────┐                            │  └─────────────────────────────────────┘
+│            ▼                      ▼                            │
+│       DynamoDB              CloudWatch Metrics                 │
+│   (Historical record)       (per-node, 5 metrics)              │
+│                                   │                            │
+│                                   │  Per-node alarms           │
+│                                   ▼                            │
+│            ┌─────────────────────────────────────┐             │
+│            │       Composite Alarm               │             │
+│            │  (any threshold) AND (confidence)   │             │
+│            └─────────────────────────────────────┘             │
+│                                   │                            │
+│                                   ▼                            │
+│                          SNS → Email Alert                     │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
 ```
+
+The two systems share identical firmware and ML inference logic but differ in their output path: fixed nodes push to the cloud for fleet-wide monitoring, the handheld renders results locally for spot-checks.
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+- Python 3.10+
+- AWS CLI configured with credentials for the deployment account
+- AWS CDK v2 (`npm install -g aws-cdk`)
+- Provisioned X.509 certificates per device (uploaded to AWS Secrets Manager — see `cloud_infrastructure/docs/`)
+
+### Deploy the Cloud Stack
+
+```bash
+# Clone the repo
+git clone https://github.com/mwchavez/enki-leak-detection.git
+cd enki-leak-detection/cloud_infrastructure/aws_backend_CDK
+
+# Install Python dependencies
+pip install -r requirements.txt
+
+# One-time bootstrap (per account/region)
+cdk bootstrap aws://<ACCOUNT_ID>/us-east-2
+
+# Deploy with required parameters
+cdk deploy \
+  --parameters CertArnNode-01=<node-01 cert ARN> \
+  --parameters CertArnNode-02=<node-02 cert ARN> \
+  --parameters AlertEmail=<your-email@example.com>
+```
+
+After deploy, confirm the email subscription that SNS sends, then verify the dashboard at CloudWatch → Dashboards → `Leak_Detection_Dashboard`.
 
 ---
 
@@ -82,9 +114,11 @@ A portable handheld device with onboard sensors and a TensorFlow Lite model runs
 |---|---|---|
 | **IoT Core** | MQTT broker & device gateway | Managed service; handles device authentication with X.509 certificates — no custom broker needed |
 | **DynamoDB** | Raw sensor data storage | NoSQL with on-demand scaling; handles high-frequency sensor writes with single-digit millisecond latency |
-| **CloudWatch** | Threshold alerting & monitoring | Native AWS monitoring; configurable metric alarms eliminate the need for custom processing code |
-| **SNS** | Alert notifications | Delivers email alerts when CloudWatch alarm thresholds are exceeded |
+| **CloudWatch** | Threshold alerting, dashboards & composite alarms | Native AWS monitoring; metric alarms + composite alarm logic eliminate the need for custom processing code |
+| **SNS** | Alert notifications | Delivers email alerts when the composite alarm fires |
 | **IAM** | Access control | Least-privilege roles scoped per service; IoT Rules Engine assumes a role to write to DynamoDB |
+| **Secrets Manager** | Device certificate storage | Private keys and certs stored as secrets and retrieved by deploy scripts — never committed to git |
+| **AWS Backup** | DynamoDB backup vault | Daily automated backups of sensor history with 7-day retention; protects against accidental table changes |
 | **AWS CDK** | Infrastructure as Code | Entire cloud stack defined in Python; parameterized and portable across AWS accounts |
 
 ---
@@ -93,58 +127,61 @@ A portable handheld device with onboard sensors and a TensorFlow Lite model runs
 
 | Component | Role | Details |
 |---|---|---|
-| **ESP32-S3** | Microcontroller | Drives both fixed nodes and handheld device |
-| **SHTC3** | Temperature & humidity sensor | Detects environmental changes near pipes |
-| **MPU6050** | Vibration/motion sensor | Detects pipe vibration anomalies |
+| **ESP32-S3** | Microcontroller | Drives both fixed nodes and the handheld device; identical firmware on each |
+| **BME680** | Environmental sensor | Provides temperature and humidity (moisture) readings near the pipe |
+| **ADXL335** | Accelerometer | Detects pipe vibration anomalies |
 | **INMP441** | I2S digital microphone | Acoustic sensing for pipe resonance detection |
-| **HC-SR04** | Ultrasonic sensor | Proximity-based moisture/leak detection |
-| **TensorFlow Lite** | Edge ML framework | Runs leak classification model on the handheld ESP32 |
+| **TensorFlow Lite** | Edge ML framework | Runs leak classification model directly on the ESP32; outputs a 0.0–1.0 confidence score |
+| **LCD Display** | Handheld output | Renders "Leak" / "No Leak" verdict on the standalone handheld device |
 
 ---
 
 ## 📡 Sensor Data Schema
 
-Each fixed node publishes JSON payloads via MQTT to the topic pattern `leaksensor/node-XX/data`:
+Each fixed node publishes JSON payloads via MQTT to the topic pattern `leaksensor/<node-id>/data`:
 
 ```json
 {
   "device_id": "node-01",
-  "timestamp": 1709312580,
-  "moisture": 72.4,
-  "temperature": 21.3,
-  "vibration": 0.12,
-  "acoustic": 340.5,
-  "confidence_score": 0.67
+  "timestamp": 1745601234,
+  "moisture": 50.4,
+  "temperature": 24.3,
+  "vibration": 714,
+  "acoustic": 28482,
+  "confidence_score": 0.23
 }
-
-Each fixed node publishes JSON payloads via MQTT to the topic pattern leaksensor/node-XX/data:
-
-
 ```
+
+> **Note:** Acoustic and vibration values are currently published as **raw sensor units** rather than calibrated Hz / g-force. Schema-to-firmware unit calibration is tracked as future work (see Section below). The example values above are representative of post-clamp baseline readings collected on April 22–23, 2026.
 
 | Field | Type | Description |
 |---|---|---|
-| `device_id` | String | Unique identifier for the sensor node (partition key) |
-| `timestamp` | Number | Unix epoch in seconds (sort key) |
-| `moisture` | Number | Relative humidity/moisture percentage near the node |
+| `device_id` | String | Unique identifier for the sensor node (DynamoDB partition key) |
+| `timestamp` | Number | Unix epoch in seconds (DynamoDB sort key) |
+| `moisture` | Number | Relative humidity / moisture percentage near the node |
 | `temperature` | Number | Ambient temperature in Celsius |
-| `vibration` | Number | Vibration intensity (g-force units) |
-| `acoustic` | Number | Sound frequency in Hz (pipe resonance detection) |
+| `vibration` | Number | Vibration intensity (raw ADXL335 reading) |
+| `acoustic` | Number | Acoustic intensity (raw INMP441 reading) |
+| `confidence_score` | Number | On-device ML model's leak confidence (0.0 – 1.0) |
 
 ---
 
 ## 🚨 Alert Logic
 
-CloudWatch Metric Alarms evaluate incoming sensor data against threshold rules and trigger SNS notifications:
+Each per-node metric is evaluated against an anomaly-detection threshold; the composite alarm fires only when a threshold breach co-occurs with a high model confidence score. This cross-validation is the actual leak-detection mechanism.
 
-| Condition | Threshold | Action |
+| Channel | Threshold | Notes |
 |---|---|---|
-| High moisture | `moisture > 80%` | Trigger alert |
-| Temperature spike | `temp change > 5°C in 60s` | Trigger alert |
-| Acoustic anomaly | `acoustic > 500 Hz sustained` | Trigger alert |
-| Combined signal | Any 2+ thresholds crossed | High-priority alert |
+| Moisture | `> 55%` | Above observed post-clamp baseline maximum (~53.6%) |
+| Temperature | `> 26°C` | Headroom over baseline maximum (~24.5°C) for normal room thermal drift |
+| Acoustic | `> 29,500` (raw) | Above baseline maximum (~29,006) on the test rig |
+| Vibration | `> 900` (raw) | Above baseline maximum (~831) on the test rig |
+| Confidence Score | `≥ 0.8` | ML model's leak verdict |
+| **Composite Alarm** | `(any threshold breach) AND (confidence ≥ 0.8)` | Triggers SNS email |
 
-> **Design Decision:** The cloud pipeline uses rule-based threshold detection rather than ML. In a controlled environment with known baselines, CloudWatch alarms provide reliable, debuggable alerting. ML-based cloud detection is scoped as future work for larger-scale, multi-building deployments.
+All alarms require **3 consecutive evaluation periods** (~3 minutes) before firing, filtering out single-period transients.
+
+> **Design Decision:** Thresholds and ML confidence are kept as independent signals and combined only at the composite alarm. Thresholds give debuggable, deterministic anomaly bounds; the ML model captures multi-modal correlations no single threshold can express. Requiring agreement between the two reduces false positives over either signal alone. Threshold values are currently set as **anomaly-detection bounds** above the observed baseline rather than as validated leak-separation bounds — see the Future Work section for the test-rig limitation that drove this choice.
 
 ---
 
@@ -153,17 +190,21 @@ CloudWatch Metric Alarms evaluate incoming sensor data against threshold rules a
 ```
 enki-leak-detection/
 ├── cloud_infrastructure/        # AWS CDK stack (Python)
-│   ├── leak_detection_practicum_stack.py
-│   ├── docs/
-│        ├── Architecture.md 
+│   ├── aws_backend_CDK/
+│   └── docs/
+│        ├── Architecture.md
+│        └── gathering_data.md
 ├── ml_training/                 # ML model training & dataset generation
 │   ├── train_fusion_model.py
 │   ├── generate_fake_dataset.py
 │   ├── leak_fusion_model.tflite
 │   ├── norm_mu.csv
 │   └── norm_sigma.csv
-├── pipe_nodes/                  # (Planned) ESP32 firmware for fixed sensor nodes
-├── handheld_device/             # (Planned) ESP32 firmware + TFLite for handheld
+├── pipe_nodes/                  # ESP32 firmware for fixed sensor nodes
+├── end_user_concept/            # Homeowner-facing dashboard concept (Google AI Studio)
+├── handheld_device/             # (Planned) ESP32 firmware for handheld
+├── wiki/
+│   └── Debugging-and-Logs.md
 └── README.md
 ```
 
@@ -180,23 +221,34 @@ enki-leak-detection/
 - [x] End-to-end MQTT → IoT Core → DynamoDB pipeline tested
 - [x] SNS Topic with email subscription
 - [x] Infrastructure defined as code with AWS CDK (Python)
-- [x] CloudWatch metric alarms for threshold detection
-- [x] CloudWatch dashboard for monitoring
+- [x] Per-node CloudWatch metrics via `${device_id}` substitution
+- [x] CloudWatch threshold alarms (moisture, temperature, acoustic, vibration, confidence)
+- [x] Composite alarms for ML confidence × threshold cross-validation
+- [x] CloudWatch dashboard with per-node graphs and System Status widget
+- [x] AWS Backup vault with daily DynamoDB snapshots (7-day retention)
+- [x] Device certificates migrated to AWS Secrets Manager
+- [x] Baseline characterization & threshold tuning (April 22–23 testing)
+- [x] End-user dashboard concept (homeowner-facing UI prototype)
+- [ ] Refinement
 
 ### Hardware & Sensors (Andres, Carolina)
 - [x] Sensor data sheets compiled
 - [x] Bill of materials finalized
 - [x] ESP32 WiFi connection and MQTT data transfer tested
-- [ ] Fixed pipe node prototype assembly
-- [ ] Handheld device CAD design (in progress)
-- [ ] Handheld device assembly
+- [x] Fixed pipe node prototype assembly
+- [x] Pipe-clamp ("clam") fixtures fabricated and deployed
+- [x] Handheld device CAD design
+- [x] Handheld device assembly
+- [ ] Refinement
 
 ### ML Model (Ethan)
 - [x] Fake dataset generator for training
 - [x] TFLite model trained and exported
 - [x] Normalization parameters saved (norm_mu.csv, norm_sigma.csv)
 - [x] Embedded AI deployment on ESP32-S3
-- [ ] Handheld integration and field testing
+- [x] Handheld integration and field testing
+- [x] Multi-session test data collection (no-leak baselines + leak simulation)
+- [ ] Refinement
 
 ---
 
@@ -204,17 +256,36 @@ enki-leak-detection/
 
 - **No root account usage** — IAM user with scoped permissions only
 - **Certificate-based mutual TLS** — X.509 certificates authenticate every IoT device
-- **Least-privilege IoT policies** — device policies scoped to specific MQTT topics (`leaksensor/node-*/data`)
-- **IAM Roles over IAM Users** — services assume temporary roles; IoT Rules Engine has only `dynamodb:PutItem` permission on the sensor table
-- **Secrets excluded from version control** — certificates, WiFi credentials, and ARNs kept out of the repo via `.gitignore`
-- **CDK parameterization** — certificate ARNs passed as `CfnParameter` at deploy time, not hardcoded
+- **Least-privilege IoT policies** — device policies scoped to specific MQTT topics (`leaksensor/<node-id>/data`)
+- **IAM Roles over IAM Users** — services assume temporary roles; the IoT Rules Engine has only `dynamodb:PutItem` permission on the sensor table
+- **Secrets Manager for device credentials** — private keys, device certs, and the Amazon Root CA are stored as managed secrets rather than in repo files; deploy scripts retrieve them at provisioning time
+- **CDK parameterization** — certificate ARNs and the alert email are passed as `CfnParameter` at deploy time, never hardcoded
+- **Secrets excluded from version control** — `.gitignore` excludes any local cert artifacts, WiFi credentials, and `cdk.out`
 
 ---
 
-## 🔗 Resources
+## 🔭 Future Work
 
-- [Project Wiki](../../wiki) — Full technical report, architecture decisions, and results
-- [GitHub Project Board](../../projects) — Milestone tracking and task assignments
+- **Leak stimulus methodology.** The current test rig uses a small bleed valve into a contained bucket, which doesn't produce conditions sensors are positioned to detect (water on the pipe exterior, flow disruption, surface temperature change). Future testing should exercise these conditions directly.
+- **Baseline subtraction for motor noise.** The closed-loop test rig is dominated by its circulation motor on the acoustic and vibration channels. Characterizing and subtracting the motor signature would improve signal-to-noise for those modalities.
+- **Variance and rate-of-change alarms.** Some leak signatures show up as variance shifts even when the mean stays flat. CloudWatch Metric Math (`RATE()`, `STDDEV()`) and Anomaly Detection alarms could capture this without additional firmware work.
+- **Deployment in a realistic environment.** Building plumbing with longer pipe runs and no co-located circulation motor would let the acoustic and vibration channels function as designed.
+- **Sensor calibration pass.** Convert raw acoustic and vibration values to calibrated Hz / g-force units to match the documented schema.
+- **Multi-node validation.** Confirm both nodes produce consistent baselines and respond similarly to stimuli once node-02 is fully online.
+
+---
+
+## 📊 Individual Contribution Summary
+
+> Per the Capstone Project Guide, contribution is measured in completed Story Points from the Project Board.
+
+| Team Member | Total Story Points Completed | Contribution % |
+|---|---|---|
+| Moses Chavez | _TBD_ | _TBD_ |
+| Andres Varela | _TBD_ | _TBD_ |
+| Ethan Garcia | _TBD_ | _TBD_ |
+| Carolina Flores | _TBD_ | _TBD_ |
+| **Team Total** | _TBD_ | **100.0%** |
 
 ---
 
