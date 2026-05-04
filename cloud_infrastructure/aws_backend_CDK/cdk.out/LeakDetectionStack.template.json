@@ -1,0 +1,1299 @@
+{
+ "Parameters": {
+  "CertArnNode01": {
+   "Type": "String",
+   "Description": "Certificate ARN for Node01"
+  },
+  "CertArnNode02": {
+   "Type": "String",
+   "Description": "Certificate ARN for Node02"
+  },
+  "AlertEmail": {
+   "Type": "String",
+   "Description": "Email address for leak detection alerts"
+  },
+  "BootstrapVersion": {
+   "Type": "AWS::SSM::Parameter::Value<String>",
+   "Default": "/cdk-bootstrap/hnb659fds/version",
+   "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]"
+  }
+ },
+ "Resources": {
+  "Node01Thing": {
+   "Type": "AWS::IoT::Thing",
+   "Properties": {
+    "ThingName": "node01"
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/Node01Thing"
+   }
+  },
+  "Node01Policy": {
+   "Type": "AWS::IoT::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Version": "2012-10-17",
+     "Statement": [
+      {
+       "Effect": "Allow",
+       "Action": "iot:Connect",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:aws:iot:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":client/node01"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Effect": "Allow",
+       "Action": "iot:Publish",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:aws:iot:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":topic/leaksensor/node01/data"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Effect": "Allow",
+       "Action": "iot:Subscribe",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:aws:iot:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":topicfilter/leaksensor/node01/data"
+          ]
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "PolicyName": "leak_detect_node01_policy"
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/Node01Policy"
+   }
+  },
+  "Node01ThingAttachment": {
+   "Type": "AWS::IoT::ThingPrincipalAttachment",
+   "Properties": {
+    "Principal": {
+     "Ref": "CertArnNode01"
+    },
+    "ThingName": "node01"
+   },
+   "DependsOn": [
+    "Node01Thing"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/Node01ThingAttachment"
+   }
+  },
+  "Node01PolicyAttachment": {
+   "Type": "AWS::IoT::PolicyPrincipalAttachment",
+   "Properties": {
+    "PolicyName": "leak_detect_node01_policy",
+    "Principal": {
+     "Ref": "CertArnNode01"
+    }
+   },
+   "DependsOn": [
+    "Node01Policy"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/Node01PolicyAttachment"
+   }
+  },
+  "Node02Thing": {
+   "Type": "AWS::IoT::Thing",
+   "Properties": {
+    "ThingName": "node02"
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/Node02Thing"
+   }
+  },
+  "Node02Policy": {
+   "Type": "AWS::IoT::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Version": "2012-10-17",
+     "Statement": [
+      {
+       "Effect": "Allow",
+       "Action": "iot:Connect",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:aws:iot:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":client/node02"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Effect": "Allow",
+       "Action": "iot:Publish",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:aws:iot:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":topic/leaksensor/node02/data"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Effect": "Allow",
+       "Action": "iot:Subscribe",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:aws:iot:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":topicfilter/leaksensor/node02/data"
+          ]
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "PolicyName": "leak_detect_node02_policy"
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/Node02Policy"
+   }
+  },
+  "Node02ThingAttachment": {
+   "Type": "AWS::IoT::ThingPrincipalAttachment",
+   "Properties": {
+    "Principal": {
+     "Ref": "CertArnNode02"
+    },
+    "ThingName": "node02"
+   },
+   "DependsOn": [
+    "Node02Thing"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/Node02ThingAttachment"
+   }
+  },
+  "Node02PolicyAttachment": {
+   "Type": "AWS::IoT::PolicyPrincipalAttachment",
+   "Properties": {
+    "PolicyName": "leak_detect_node02_policy",
+    "Principal": {
+     "Ref": "CertArnNode02"
+    }
+   },
+   "DependsOn": [
+    "Node02Policy"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/Node02PolicyAttachment"
+   }
+  },
+  "LeakDetectionTableF1EB85BE": {
+   "Type": "AWS::DynamoDB::GlobalTable",
+   "Properties": {
+    "AttributeDefinitions": [
+     {
+      "AttributeName": "device_id",
+      "AttributeType": "S"
+     },
+     {
+      "AttributeName": "timestamp",
+      "AttributeType": "N"
+     }
+    ],
+    "BillingMode": "PAY_PER_REQUEST",
+    "KeySchema": [
+     {
+      "AttributeName": "device_id",
+      "KeyType": "HASH"
+     },
+     {
+      "AttributeName": "timestamp",
+      "KeyType": "RANGE"
+     }
+    ],
+    "Replicas": [
+     {
+      "PointInTimeRecoverySpecification": {
+       "PointInTimeRecoveryEnabled": true
+      },
+      "Region": {
+       "Ref": "AWS::Region"
+      }
+     }
+    ]
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/LeakDetectionTable/Resource"
+   }
+  },
+  "LeakDetectionBackupVault9B9A0AD4": {
+   "Type": "AWS::Backup::BackupVault",
+   "Properties": {
+    "BackupVaultName": "LeakDetectionBackupVault"
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/LeakDetectionBackupVault/Resource"
+   }
+  },
+  "LeakDetectionBackupPlan4EDE8A8E": {
+   "Type": "AWS::Backup::BackupPlan",
+   "Properties": {
+    "BackupPlan": {
+     "BackupPlanName": "LeakDetectionBackupPlan",
+     "BackupPlanRule": [
+      {
+       "Lifecycle": {
+        "DeleteAfterDays": 7
+       },
+       "RuleName": "DailyBackup",
+       "ScheduleExpression": "cron(0 3 * * ? *)",
+       "TargetBackupVault": {
+        "Fn::GetAtt": [
+         "LeakDetectionBackupVault9B9A0AD4",
+         "BackupVaultName"
+        ]
+       }
+      }
+     ]
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/LeakDetectionBackupPlan/Resource"
+   }
+  },
+  "LeakDetectionBackupPlanLeakDetectionTableSelectionRole5E03A3E9": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "backup.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "ManagedPolicyArns": [
+     {
+      "Fn::Join": [
+       "",
+       [
+        "arn:",
+        {
+         "Ref": "AWS::Partition"
+        },
+        ":iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
+       ]
+      ]
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/LeakDetectionBackupPlan/LeakDetectionTableSelection/Role/Resource"
+   }
+  },
+  "LeakDetectionBackupPlanLeakDetectionTableSelectionEFD43891": {
+   "Type": "AWS::Backup::BackupSelection",
+   "Properties": {
+    "BackupPlanId": {
+     "Fn::GetAtt": [
+      "LeakDetectionBackupPlan4EDE8A8E",
+      "BackupPlanId"
+     ]
+    },
+    "BackupSelection": {
+     "IamRoleArn": {
+      "Fn::GetAtt": [
+       "LeakDetectionBackupPlanLeakDetectionTableSelectionRole5E03A3E9",
+       "Arn"
+      ]
+     },
+     "Resources": [
+      {
+       "Fn::GetAtt": [
+        "LeakDetectionTableF1EB85BE",
+        "Arn"
+       ]
+      }
+     ],
+     "SelectionName": "LeakDetectionTableSelection"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/LeakDetectionBackupPlan/LeakDetectionTableSelection/Resource"
+   }
+  },
+  "IoTCoreDynamoWriteRoleCAC34FAC": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "iot.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/IoTCoreDynamoWriteRole/Resource"
+   }
+  },
+  "IoTCoreDynamoWriteRoleDefaultPolicyD0764035": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "dynamodb:PutItem",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "LeakDetectionTableF1EB85BE",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "IoTCoreDynamoWriteRoleDefaultPolicyD0764035",
+    "Roles": [
+     {
+      "Ref": "IoTCoreDynamoWriteRoleCAC34FAC"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/IoTCoreDynamoWriteRole/DefaultPolicy/Resource"
+   }
+  },
+  "IoTCoreSendMetricsToCloudWatch6D4A59AD": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "iot.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/IoTCoreSendMetricsToCloudWatch/Resource"
+   }
+  },
+  "IoTCoreSendMetricsToCloudWatchDefaultPolicy9FA6B77B": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "cloudwatch:PutMetricData",
+       "Effect": "Allow",
+       "Resource": "*"
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "IoTCoreSendMetricsToCloudWatchDefaultPolicy9FA6B77B",
+    "Roles": [
+     {
+      "Ref": "IoTCoreSendMetricsToCloudWatch6D4A59AD"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/IoTCoreSendMetricsToCloudWatch/DefaultPolicy/Resource"
+   }
+  },
+  "LeakDetectionTopicRule": {
+   "Type": "AWS::IoT::TopicRule",
+   "Properties": {
+    "TopicRulePayload": {
+     "Actions": [
+      {
+       "DynamoDBv2": {
+        "PutItem": {
+         "TableName": {
+          "Ref": "LeakDetectionTableF1EB85BE"
+         }
+        },
+        "RoleArn": {
+         "Fn::GetAtt": [
+          "IoTCoreDynamoWriteRoleCAC34FAC",
+          "Arn"
+         ]
+        }
+       }
+      },
+      {
+       "CloudwatchMetric": {
+        "MetricName": "${device_id}_moisture",
+        "MetricNamespace": "Enki/LeakDetection",
+        "MetricUnit": "Percent",
+        "MetricValue": "${moisture}",
+        "RoleArn": {
+         "Fn::GetAtt": [
+          "IoTCoreSendMetricsToCloudWatch6D4A59AD",
+          "Arn"
+         ]
+        }
+       }
+      },
+      {
+       "CloudwatchMetric": {
+        "MetricName": "${device_id}_temperature",
+        "MetricNamespace": "Enki/LeakDetection",
+        "MetricUnit": "None",
+        "MetricValue": "${temperature}",
+        "RoleArn": {
+         "Fn::GetAtt": [
+          "IoTCoreSendMetricsToCloudWatch6D4A59AD",
+          "Arn"
+         ]
+        }
+       }
+      },
+      {
+       "CloudwatchMetric": {
+        "MetricName": "${device_id}_vibration",
+        "MetricNamespace": "Enki/LeakDetection",
+        "MetricUnit": "None",
+        "MetricValue": "${vibration}",
+        "RoleArn": {
+         "Fn::GetAtt": [
+          "IoTCoreSendMetricsToCloudWatch6D4A59AD",
+          "Arn"
+         ]
+        }
+       }
+      },
+      {
+       "CloudwatchMetric": {
+        "MetricName": "${device_id}_acoustic",
+        "MetricNamespace": "Enki/LeakDetection",
+        "MetricUnit": "None",
+        "MetricValue": "${acoustic}",
+        "RoleArn": {
+         "Fn::GetAtt": [
+          "IoTCoreSendMetricsToCloudWatch6D4A59AD",
+          "Arn"
+         ]
+        }
+       }
+      },
+      {
+       "CloudwatchMetric": {
+        "MetricName": "${device_id}_confidence_score",
+        "MetricNamespace": "Enki/LeakDetection",
+        "MetricUnit": "None",
+        "MetricValue": "${confidence_score}",
+        "RoleArn": {
+         "Fn::GetAtt": [
+          "IoTCoreSendMetricsToCloudWatch6D4A59AD",
+          "Arn"
+         ]
+        }
+       }
+      }
+     ],
+     "Sql": "SELECT * FROM 'leaksensor/+/data'"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/LeakDetectionTopicRule"
+   }
+  },
+  "LeakAlertTopicC251D414": {
+   "Type": "AWS::SNS::Topic",
+   "Properties": {
+    "DisplayName": "Leak Detection Alert"
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/LeakAlertTopic/Resource"
+   }
+  },
+  "LeakAlertTopicTokenSubscription15062B5F1": {
+   "Type": "AWS::SNS::Subscription",
+   "Properties": {
+    "Endpoint": {
+     "Ref": "AlertEmail"
+    },
+    "Protocol": "email",
+    "TopicArn": {
+     "Ref": "LeakAlertTopicC251D414"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/LeakAlertTopic/TokenSubscription:1/Resource"
+   }
+  },
+  "AlarmforHighMoisturenode014960668D": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Properties": {
+    "AlarmActions": [
+     {
+      "Ref": "LeakAlertTopicC251D414"
+     }
+    ],
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "EvaluationPeriods": 3,
+    "MetricName": "node01_moisture",
+    "Namespace": "Enki/LeakDetection",
+    "Period": 300,
+    "Statistic": "Average",
+    "Threshold": 80
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/Alarm for High Moisture node01/Resource"
+   }
+  },
+  "AlarmforTemperatureSpikenode01677B04B1": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Properties": {
+    "AlarmActions": [
+     {
+      "Ref": "LeakAlertTopicC251D414"
+     }
+    ],
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "EvaluationPeriods": 3,
+    "MetricName": "node01_temperature",
+    "Namespace": "Enki/LeakDetection",
+    "Period": 300,
+    "Statistic": "Average",
+    "Threshold": 18
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/Alarm for Temperature Spike node01/Resource"
+   }
+  },
+  "AlarmforAcousticAnomalynode01636844F8": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Properties": {
+    "AlarmActions": [
+     {
+      "Ref": "LeakAlertTopicC251D414"
+     }
+    ],
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "EvaluationPeriods": 3,
+    "MetricName": "node01_acoustic",
+    "Namespace": "Enki/LeakDetection",
+    "Period": 300,
+    "Statistic": "Average",
+    "Threshold": 500
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/Alarm for Acoustic Anomaly node01/Resource"
+   }
+  },
+  "AlarmforVibrationAnomalynode016758B127": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Properties": {
+    "AlarmActions": [
+     {
+      "Ref": "LeakAlertTopicC251D414"
+     }
+    ],
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "EvaluationPeriods": 3,
+    "MetricName": "node01_vibration",
+    "Namespace": "Enki/LeakDetection",
+    "Period": 300,
+    "Statistic": "Average",
+    "Threshold": 0.3
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/Alarm for Vibration Anomaly node01/Resource"
+   }
+  },
+  "AlarmforConfidenceScorenode0154ACB3B1": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Properties": {
+    "AlarmActions": [
+     {
+      "Ref": "LeakAlertTopicC251D414"
+     }
+    ],
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "EvaluationPeriods": 3,
+    "MetricName": "node01_confidence_score",
+    "Namespace": "Enki/LeakDetection",
+    "Period": 300,
+    "Statistic": "Average",
+    "Threshold": 0.5
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/Alarm for Confidence Score node01/Resource"
+   }
+  },
+  "AlarmforHighMoisturenode02B01A971E": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Properties": {
+    "AlarmActions": [
+     {
+      "Ref": "LeakAlertTopicC251D414"
+     }
+    ],
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "EvaluationPeriods": 3,
+    "MetricName": "node02_moisture",
+    "Namespace": "Enki/LeakDetection",
+    "Period": 300,
+    "Statistic": "Average",
+    "Threshold": 80
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/Alarm for High Moisture node02/Resource"
+   }
+  },
+  "AlarmforTemperatureSpikenode02A4D6B7AC": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Properties": {
+    "AlarmActions": [
+     {
+      "Ref": "LeakAlertTopicC251D414"
+     }
+    ],
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "EvaluationPeriods": 3,
+    "MetricName": "node02_temperature",
+    "Namespace": "Enki/LeakDetection",
+    "Period": 300,
+    "Statistic": "Average",
+    "Threshold": 18
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/Alarm for Temperature Spike node02/Resource"
+   }
+  },
+  "AlarmforAcousticAnomalynode02E55A016F": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Properties": {
+    "AlarmActions": [
+     {
+      "Ref": "LeakAlertTopicC251D414"
+     }
+    ],
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "EvaluationPeriods": 3,
+    "MetricName": "node02_acoustic",
+    "Namespace": "Enki/LeakDetection",
+    "Period": 300,
+    "Statistic": "Average",
+    "Threshold": 500
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/Alarm for Acoustic Anomaly node02/Resource"
+   }
+  },
+  "AlarmforVibrationAnomalynode02191E98DE": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Properties": {
+    "AlarmActions": [
+     {
+      "Ref": "LeakAlertTopicC251D414"
+     }
+    ],
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "EvaluationPeriods": 3,
+    "MetricName": "node02_vibration",
+    "Namespace": "Enki/LeakDetection",
+    "Period": 300,
+    "Statistic": "Average",
+    "Threshold": 0.3
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/Alarm for Vibration Anomaly node02/Resource"
+   }
+  },
+  "AlarmforConfidenceScorenode02EC967414": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Properties": {
+    "AlarmActions": [
+     {
+      "Ref": "LeakAlertTopicC251D414"
+     }
+    ],
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "EvaluationPeriods": 3,
+    "MetricName": "node02_confidence_score",
+    "Namespace": "Enki/LeakDetection",
+    "Period": 300,
+    "Statistic": "Average",
+    "Threshold": 0.5
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/Alarm for Confidence Score node02/Resource"
+   }
+  },
+  "LeadDetectDashA407E2FA": {
+   "Type": "AWS::CloudWatch::Dashboard",
+   "Properties": {
+    "DashboardBody": {
+     "Fn::Join": [
+      "",
+      [
+       "{\"widgets\":[{\"type\":\"text\",\"width\":6,\"height\":2,\"x\":0,\"y\":0,\"properties\":{\"markdown\":\"# node01\"}},{\"type\":\"metric\",\"width\":6,\"height\":6,\"x\":0,\"y\":2,\"properties\":{\"view\":\"timeSeries\",\"title\":\"node01_moisture\",\"region\":\"",
+       {
+        "Ref": "AWS::Region"
+       },
+       "\",\"metrics\":[[\"Enki/LeakDetection\",\"node01_moisture\"]],\"yAxis\":{}}},{\"type\":\"metric\",\"width\":6,\"height\":6,\"x\":6,\"y\":2,\"properties\":{\"view\":\"timeSeries\",\"title\":\"node01_temperature\",\"region\":\"",
+       {
+        "Ref": "AWS::Region"
+       },
+       "\",\"metrics\":[[\"Enki/LeakDetection\",\"node01_temperature\"]],\"yAxis\":{}}},{\"type\":\"metric\",\"width\":6,\"height\":6,\"x\":12,\"y\":2,\"properties\":{\"view\":\"timeSeries\",\"title\":\"node01_acoustic\",\"region\":\"",
+       {
+        "Ref": "AWS::Region"
+       },
+       "\",\"metrics\":[[\"Enki/LeakDetection\",\"node01_acoustic\"]],\"yAxis\":{}}},{\"type\":\"metric\",\"width\":6,\"height\":6,\"x\":18,\"y\":2,\"properties\":{\"view\":\"timeSeries\",\"title\":\"node01_vibration\",\"region\":\"",
+       {
+        "Ref": "AWS::Region"
+       },
+       "\",\"metrics\":[[\"Enki/LeakDetection\",\"node01_vibration\"]],\"yAxis\":{}}},{\"type\":\"text\",\"width\":6,\"height\":2,\"x\":0,\"y\":8,\"properties\":{\"markdown\":\"# node02\"}},{\"type\":\"metric\",\"width\":6,\"height\":6,\"x\":0,\"y\":10,\"properties\":{\"view\":\"timeSeries\",\"title\":\"node02_moisture\",\"region\":\"",
+       {
+        "Ref": "AWS::Region"
+       },
+       "\",\"metrics\":[[\"Enki/LeakDetection\",\"node02_moisture\"]],\"yAxis\":{}}},{\"type\":\"metric\",\"width\":6,\"height\":6,\"x\":6,\"y\":10,\"properties\":{\"view\":\"timeSeries\",\"title\":\"node02_temperature\",\"region\":\"",
+       {
+        "Ref": "AWS::Region"
+       },
+       "\",\"metrics\":[[\"Enki/LeakDetection\",\"node02_temperature\"]],\"yAxis\":{}}},{\"type\":\"metric\",\"width\":6,\"height\":6,\"x\":12,\"y\":10,\"properties\":{\"view\":\"timeSeries\",\"title\":\"node02_acoustic\",\"region\":\"",
+       {
+        "Ref": "AWS::Region"
+       },
+       "\",\"metrics\":[[\"Enki/LeakDetection\",\"node02_acoustic\"]],\"yAxis\":{}}},{\"type\":\"metric\",\"width\":6,\"height\":6,\"x\":18,\"y\":10,\"properties\":{\"view\":\"timeSeries\",\"title\":\"node02_vibration\",\"region\":\"",
+       {
+        "Ref": "AWS::Region"
+       },
+       "\",\"metrics\":[[\"Enki/LeakDetection\",\"node02_vibration\"]],\"yAxis\":{}}},{\"type\":\"alarm\",\"width\":6,\"height\":3,\"x\":0,\"y\":16,\"properties\":{\"title\":\"System Status\",\"alarms\":[\"",
+       {
+        "Fn::GetAtt": [
+         "LeakDetectionCompositeAlarmnode010E547E3E",
+         "Arn"
+        ]
+       },
+       "\",\"",
+       {
+        "Fn::GetAtt": [
+         "LeakDetectionCompositeAlarmnode02A1944524",
+         "Arn"
+        ]
+       },
+       "\"]}}]}"
+      ]
+     ]
+    },
+    "DashboardName": "Leak_Detection_Dashboard"
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/LeadDetectDash/Resource"
+   }
+  },
+  "LeakDetectionCompositeAlarmnode010E547E3E": {
+   "Type": "AWS::CloudWatch::CompositeAlarm",
+   "Properties": {
+    "AlarmActions": [
+     {
+      "Ref": "LeakAlertTopicC251D414"
+     }
+    ],
+    "AlarmName": "LeakDetectionCompositeAlarm_node01",
+    "AlarmRule": {
+     "Fn::Join": [
+      "",
+      [
+       "((ALARM(\"",
+       {
+        "Fn::GetAtt": [
+         "AlarmforHighMoisturenode014960668D",
+         "Arn"
+        ]
+       },
+       "\") OR ALARM(\"",
+       {
+        "Fn::GetAtt": [
+         "AlarmforTemperatureSpikenode01677B04B1",
+         "Arn"
+        ]
+       },
+       "\") OR ALARM(\"",
+       {
+        "Fn::GetAtt": [
+         "AlarmforAcousticAnomalynode01636844F8",
+         "Arn"
+        ]
+       },
+       "\") OR ALARM(\"",
+       {
+        "Fn::GetAtt": [
+         "AlarmforVibrationAnomalynode016758B127",
+         "Arn"
+        ]
+       },
+       "\")) AND ALARM(\"",
+       {
+        "Fn::GetAtt": [
+         "AlarmforConfidenceScorenode0154ACB3B1",
+         "Arn"
+        ]
+       },
+       "\"))"
+      ]
+     ]
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/LeakDetectionCompositeAlarmnode01/Resource"
+   }
+  },
+  "LeakDetectionCompositeAlarmnode02A1944524": {
+   "Type": "AWS::CloudWatch::CompositeAlarm",
+   "Properties": {
+    "AlarmActions": [
+     {
+      "Ref": "LeakAlertTopicC251D414"
+     }
+    ],
+    "AlarmName": "LeakDetectionCompositeAlarm_node02",
+    "AlarmRule": {
+     "Fn::Join": [
+      "",
+      [
+       "((ALARM(\"",
+       {
+        "Fn::GetAtt": [
+         "AlarmforHighMoisturenode02B01A971E",
+         "Arn"
+        ]
+       },
+       "\") OR ALARM(\"",
+       {
+        "Fn::GetAtt": [
+         "AlarmforTemperatureSpikenode02A4D6B7AC",
+         "Arn"
+        ]
+       },
+       "\") OR ALARM(\"",
+       {
+        "Fn::GetAtt": [
+         "AlarmforAcousticAnomalynode02E55A016F",
+         "Arn"
+        ]
+       },
+       "\") OR ALARM(\"",
+       {
+        "Fn::GetAtt": [
+         "AlarmforVibrationAnomalynode02191E98DE",
+         "Arn"
+        ]
+       },
+       "\")) AND ALARM(\"",
+       {
+        "Fn::GetAtt": [
+         "AlarmforConfidenceScorenode02EC967414",
+         "Arn"
+        ]
+       },
+       "\"))"
+      ]
+     ]
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/LeakDetectionCompositeAlarmnode02/Resource"
+   }
+  },
+  "CDKMetadata": {
+   "Type": "AWS::CDK::Metadata",
+   "Properties": {
+    "Analytics": "v2:deflate64:H4sIAAAAAAAA/+1WTU8bMRD9LfiIzJYG9ZIbUKlCLShNIjhEUTVrD1kXr72yZ4kia/97Za83HyAkDrlQcYi8no/33tizsxkVo2/nxfkJrP2ZkE9nWpVFmBGIJ379aCbgoEZCx2Ht/wRlqQjXj2ZeKbNKfquV2PDBNHHKCNWAviQCUdVoaBf1hnNuGyWmrcaOy42B2sqyCHMoNd6PFoE1Vhm6MXNV4xSFfUa3YWNyLXLWgCNFypqfuGHjwAzUyMbslHFGmyY+zljHWam0VmaVPd46ejP+jnXdMor6oW0JOqnoeAniqW2KcJXWe2g1LQIrd7u7AahP3ovj/fNEg9mmxE2s12fuPaAehAcGUsYQNl6EbpkNM9QoYrlsvIiJgTn0tnUiI3XLffrIktm3iQcSMvtLjB3CNq3jCuoiTK3GRWDgfVujvEpH2GzvVAjbGsqgfUxMuMyKI3au4xYMrFD2TRErZPW+5dKZoRx+BLa53RFtj3Jut834ypua88ZoZXDrY6fsHc4PIjVdcZTAe3tupj5hbqPnFc5rs5QzAsL4FvtB0rGAlruh0XFvfBHSkFgEJpVvNGxevHDJy2dt6YVTTe50isZ87GhkmiN52zhLVljNxgxrUJpx9qg0oRsOKkXtmx4UVbfoPazwysohQiLIX0iE7neL7b6ifS0dF9q2cg0kqiJcanD1IjB8Bt1C9E/QKSuHaUCVQ19ZLfO+RnKxjsDW4IwyqyFw2N6PDpoo4Q/NNXTKJ9kn2SfZ/0SWpkwy8+/gq9KCk3E+Ds+7CdkjPCi5wn7AsrWSVGXCCtWqohfsb4hZHhErfSvy75i4H0Njur3tvfFrWzfWK8Lh4wBx7f8AJgRxEHB4t+8MTZSHRF3X8cmGKmu+XBRfR8XFyV+v1JlrDakai2m//gN5JL2QIQwAAA=="
+   },
+   "Metadata": {
+    "aws:cdk:path": "LeakDetectionStack/CDKMetadata/Default"
+   },
+   "Condition": "CDKMetadataAvailable"
+  }
+ },
+ "Conditions": {
+  "CDKMetadataAvailable": {
+   "Fn::Or": [
+    {
+     "Fn::Or": [
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "af-south-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-east-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-northeast-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-northeast-2"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-northeast-3"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-south-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-south-2"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-southeast-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-southeast-2"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-southeast-3"
+       ]
+      }
+     ]
+    },
+    {
+     "Fn::Or": [
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-southeast-4"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ca-central-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ca-west-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "cn-north-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "cn-northwest-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "eu-central-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "eu-central-2"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "eu-north-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "eu-south-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "eu-south-2"
+       ]
+      }
+     ]
+    },
+    {
+     "Fn::Or": [
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "eu-west-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "eu-west-2"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "eu-west-3"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "il-central-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "me-central-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "me-south-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "sa-east-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "us-east-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "us-east-2"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "us-west-1"
+       ]
+      }
+     ]
+    },
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "AWS::Region"
+      },
+      "us-west-2"
+     ]
+    }
+   ]
+  }
+ },
+ "Rules": {
+  "CheckBootstrapVersion": {
+   "Assertions": [
+    {
+     "Assert": {
+      "Fn::Not": [
+       {
+        "Fn::Contains": [
+         [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5"
+         ],
+         {
+          "Ref": "BootstrapVersion"
+         }
+        ]
+       }
+      ]
+     },
+     "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI."
+    }
+   ]
+  }
+ }
+}

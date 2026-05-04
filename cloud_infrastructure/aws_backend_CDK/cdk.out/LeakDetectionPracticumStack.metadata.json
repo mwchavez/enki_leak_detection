@@ -1,0 +1,799 @@
+{
+  "/LeakDetectionPracticumStack/CertArnNode01": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CertArnNode01"
+    }
+  ],
+  "/LeakDetectionPracticumStack/Node01Thing": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "Node01Thing"
+    }
+  ],
+  "/LeakDetectionPracticumStack/Node01Policy": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "Node01Policy"
+    }
+  ],
+  "/LeakDetectionPracticumStack/Node01ThingAttachment": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "Node01ThingAttachment"
+    }
+  ],
+  "/LeakDetectionPracticumStack/Node01PolicyAttachment": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "Node01PolicyAttachment"
+    }
+  ],
+  "/LeakDetectionPracticumStack/CertArnNode02": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CertArnNode02"
+    }
+  ],
+  "/LeakDetectionPracticumStack/Node02Thing": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "Node02Thing"
+    }
+  ],
+  "/LeakDetectionPracticumStack/Node02Policy": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "Node02Policy"
+    }
+  ],
+  "/LeakDetectionPracticumStack/Node02ThingAttachment": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "Node02ThingAttachment"
+    }
+  ],
+  "/LeakDetectionPracticumStack/Node02PolicyAttachment": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "Node02PolicyAttachment"
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakDetectionTable": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "pointInTimeRecovery": true,
+        "partitionKey": {
+          "name": "*",
+          "type": "S"
+        },
+        "billing": "*",
+        "sortKey": {
+          "name": "*",
+          "type": "N"
+        }
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakDetectionBackupVault": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "backupVaultName": "*"
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakDetectionBackupPlan": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "backupPlanRules": "*",
+        "backupVault": "*"
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addRule": [
+          {}
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addSelection": [
+          "*",
+          {
+            "resources": "*"
+          }
+        ]
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/IoTCoreDynamoWriteRole": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "assumedBy": {
+          "principalAccount": "*",
+          "assumeRoleAction": "*"
+        }
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addToPolicy": [
+          {}
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addToPrincipalPolicy": [
+          {}
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "attachInlinePolicy": [
+          "*"
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "attachInlinePolicy": [
+          "*"
+        ]
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/IoTCoreSendMetricsToCloudWatch": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "assumedBy": {
+          "principalAccount": "*",
+          "assumeRoleAction": "*"
+        }
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addToPolicy": [
+          {}
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addToPrincipalPolicy": [
+          {}
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "attachInlinePolicy": [
+          "*"
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "attachInlinePolicy": [
+          "*"
+        ]
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakDetectionTopicRule": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LeakDetectionTopicRule"
+    }
+  ],
+  "/LeakDetectionPracticumStack/AlertEmail": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "AlertEmail"
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakAlertTopic": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "displayName": "*"
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for High Moisture node01": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "evaluationPeriods": "*",
+        "threshold": "*",
+        "metric": {
+          "warnings": "*",
+          "warningsV2": "*"
+        }
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addAlarmAction": [
+          {}
+        ]
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for Temperature Spike node01": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "evaluationPeriods": "*",
+        "threshold": "*",
+        "metric": {
+          "warnings": "*",
+          "warningsV2": "*"
+        }
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addAlarmAction": [
+          {}
+        ]
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for Acoustic Anomaly node01": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "evaluationPeriods": "*",
+        "threshold": "*",
+        "metric": {
+          "warnings": "*",
+          "warningsV2": "*"
+        }
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addAlarmAction": [
+          {}
+        ]
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for Vibration Anomaly node01": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "evaluationPeriods": "*",
+        "threshold": "*",
+        "metric": {
+          "warnings": "*",
+          "warningsV2": "*"
+        }
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addAlarmAction": [
+          {}
+        ]
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for Confidence Score node01": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "evaluationPeriods": "*",
+        "threshold": "*",
+        "metric": {
+          "warnings": "*",
+          "warningsV2": "*"
+        }
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addAlarmAction": [
+          {}
+        ]
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for High Moisture node02": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "evaluationPeriods": "*",
+        "threshold": "*",
+        "metric": {
+          "warnings": "*",
+          "warningsV2": "*"
+        }
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addAlarmAction": [
+          {}
+        ]
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for Temperature Spike node02": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "evaluationPeriods": "*",
+        "threshold": "*",
+        "metric": {
+          "warnings": "*",
+          "warningsV2": "*"
+        }
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addAlarmAction": [
+          {}
+        ]
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for Acoustic Anomaly node02": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "evaluationPeriods": "*",
+        "threshold": "*",
+        "metric": {
+          "warnings": "*",
+          "warningsV2": "*"
+        }
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addAlarmAction": [
+          {}
+        ]
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for Vibration Anomaly node02": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "evaluationPeriods": "*",
+        "threshold": "*",
+        "metric": {
+          "warnings": "*",
+          "warningsV2": "*"
+        }
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addAlarmAction": [
+          {}
+        ]
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for Confidence Score node02": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "evaluationPeriods": "*",
+        "threshold": "*",
+        "metric": {
+          "warnings": "*",
+          "warningsV2": "*"
+        }
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addAlarmAction": [
+          {}
+        ]
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeadDetectDash": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "dashboardName": "*"
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addWidgets": [
+          {
+            "width": "*",
+            "height": "*",
+            "warnings": "*",
+            "warningsV2": "*"
+          }
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addWidgets": [
+          {
+            "width": "*",
+            "height": "*",
+            "warnings": "*",
+            "warningsV2": "*"
+          },
+          "*",
+          "*",
+          "*"
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addWidgets": [
+          {
+            "width": "*",
+            "height": "*",
+            "warnings": "*",
+            "warningsV2": "*"
+          }
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addWidgets": [
+          {
+            "width": "*",
+            "height": "*",
+            "warnings": "*",
+            "warningsV2": "*"
+          },
+          "*",
+          "*",
+          "*"
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addWidgets": [
+          {
+            "width": "*",
+            "height": "*",
+            "warnings": "*",
+            "warningsV2": "*"
+          }
+        ]
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakDetectionCompositeAlarmnode01": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "alarmRule": "*",
+        "compositeAlarmName": "*"
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakDetectionCompositeAlarmnode02": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "alarmRule": "*",
+        "compositeAlarmName": "*"
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/BootstrapVersion": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "BootstrapVersion"
+    }
+  ],
+  "/LeakDetectionPracticumStack/CheckBootstrapVersion": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CheckBootstrapVersion"
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakDetectionTable/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LeakDetectionTableF1EB85BE"
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakDetectionBackupVault/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LeakDetectionBackupVault9B9A0AD4"
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakDetectionBackupPlan/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LeakDetectionBackupPlan4EDE8A8E"
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakDetectionBackupPlan/LeakDetectionTableSelection": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "backupPlan": "*",
+        "resources": "*"
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/IoTCoreDynamoWriteRole/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "IoTCoreDynamoWriteRoleCAC34FAC"
+    }
+  ],
+  "/LeakDetectionPracticumStack/IoTCoreDynamoWriteRole/DefaultPolicy": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": "*"
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "attachToRole": [
+          "*"
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "attachToRole": [
+          "*"
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addStatements": [
+          {}
+        ]
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/IoTCoreSendMetricsToCloudWatch/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "IoTCoreSendMetricsToCloudWatch6D4A59AD"
+    }
+  ],
+  "/LeakDetectionPracticumStack/IoTCoreSendMetricsToCloudWatch/DefaultPolicy": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": "*"
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "attachToRole": [
+          "*"
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "attachToRole": [
+          "*"
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addStatements": [
+          {}
+        ]
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakAlertTopic/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LeakAlertTopicC251D414"
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakAlertTopic/TokenSubscription:1": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "topic": "*",
+        "endpoint": "*",
+        "protocol": "email",
+        "filterPolicy": "*",
+        "filterPolicyWithMessageBody": "*",
+        "deadLetterQueue": "*"
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for High Moisture node01/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "AlarmforHighMoisturenode014960668D"
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for Temperature Spike node01/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "AlarmforTemperatureSpikenode01677B04B1"
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for Acoustic Anomaly node01/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "AlarmforAcousticAnomalynode01636844F8"
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for Vibration Anomaly node01/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "AlarmforVibrationAnomalynode016758B127"
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for Confidence Score node01/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "AlarmforConfidenceScorenode0154ACB3B1"
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for High Moisture node02/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "AlarmforHighMoisturenode02B01A971E"
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for Temperature Spike node02/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "AlarmforTemperatureSpikenode02A4D6B7AC"
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for Acoustic Anomaly node02/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "AlarmforAcousticAnomalynode02E55A016F"
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for Vibration Anomaly node02/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "AlarmforVibrationAnomalynode02191E98DE"
+    }
+  ],
+  "/LeakDetectionPracticumStack/Alarm for Confidence Score node02/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "AlarmforConfidenceScorenode02EC967414"
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeadDetectDash/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LeadDetectDashA407E2FA"
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakDetectionCompositeAlarmnode01/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LeakDetectionCompositeAlarmnode010E547E3E"
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakDetectionCompositeAlarmnode02/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LeakDetectionCompositeAlarmnode02A1944524"
+    }
+  ],
+  "/LeakDetectionPracticumStack/CDKMetadata/Default": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CDKMetadata"
+    }
+  ],
+  "/LeakDetectionPracticumStack/CDKMetadata/Condition": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CDKMetadataAvailable"
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakDetectionBackupPlan/LeakDetectionTableSelection/Role": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "assumedBy": {
+          "principalAccount": "*",
+          "assumeRoleAction": "*"
+        }
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addManagedPolicy": [
+          {
+            "managedPolicyArn": "*"
+          }
+        ]
+      }
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakDetectionBackupPlan/LeakDetectionTableSelection/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LeakDetectionBackupPlanLeakDetectionTableSelectionEFD43891"
+    }
+  ],
+  "/LeakDetectionPracticumStack/IoTCoreDynamoWriteRole/DefaultPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "IoTCoreDynamoWriteRoleDefaultPolicyD0764035"
+    }
+  ],
+  "/LeakDetectionPracticumStack/IoTCoreSendMetricsToCloudWatch/DefaultPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "IoTCoreSendMetricsToCloudWatchDefaultPolicy9FA6B77B"
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakAlertTopic/TokenSubscription:1/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LeakAlertTopicTokenSubscription15062B5F1"
+    }
+  ],
+  "/LeakDetectionPracticumStack/LeakDetectionBackupPlan/LeakDetectionTableSelection/Role/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LeakDetectionBackupPlanLeakDetectionTableSelectionRole5E03A3E9"
+    }
+  ]
+}

@@ -1,152 +1,58 @@
-# Cloud Backend for Hybrid Leak Detection System
-**CSEC 4390 – Practicum | Spring 2026**  
-**Faculty Advisor:** Dr. Okan Caglayan & Dr. Gonzalo Parra    
-**Team:** Engineering & Cyber Security Systems
 
----
+# Welcome to your CDK Python project!
 
-## 📌 Project Overview
+This is a blank project for CDK development with Python.
 
-This repository contains the **cloud infrastructure** component of a hybrid, multi-modal water leak detection system. The full system is a joint effort between an Engineering team (responsible for physical sensors and edge AI) and a CIS/Cybersecurity team (responsible for cloud backend and data pipeline).
+The `cdk.json` file tells the CDK Toolkit how to execute your app.
 
-Our role is to build the cloud-side of the pipeline: receiving sensor data from distributed IoT nodes, storing and processing it in real time, triggering alerts when anomalies are detected, and visualizing results on a live dashboard.
+This project is set up like a standard Python project.  The initialization
+process also creates a virtualenv within this project, stored under the `.venv`
+directory.  To create the virtualenv it assumes that there is a `python3`
+(or `python` for Windows) executable in your path with access to the `venv`
+package. If for any reason the automatic creation of the virtualenv fails,
+you can create the virtualenv manually.
 
-> **In plain terms:** the Engineering team builds the physical sensors and puts them near pipes. Our team builds the cloud system that receives those sensor readings, figures out if a leak is happening, and sends an alert — all within 5 seconds.
-
----
-
-## 🏗️ System Architecture
+To manually create a virtualenv on MacOS and Linux:
 
 ```
-ESP32 Sensors (Edge Devices)
-        │
-        │  MQTT over TLS (port 8883)
-        ▼
-  AWS IoT Core
-  (MQTT Broker + Rules Engine)
-        │
-        │  IoT Rule → DynamoDB
-        ▼
-   DynamoDB
- (Raw sensor storage)
-        │
-        │  DynamoDB Streams → CloudWatch Metrics
-        ▼
-   CloudWatch
- (Threshold alerting, monitoring & logs)
-        │
-        ▼
-  SNS / Email Alert          Web Dashboard
-  (< 5 sec latency)        (Live Visualization)
+$ python3 -m venv .venv
 ```
 
-### Why Each Service Was Chosen
-
-| AWS Service | Role | Why It's Used |
-|---|---|---|
-| **IoT Core** | MQTT broker & device gateway | Managed service; handles device auth with certificates so we don't have to build our own broker |
-| **DynamoDB** | Raw sensor data storage | NoSQL, scales automatically, fast writes for high-frequency sensor data |
-| **CloudWatch** | Threshold alerting, monitoring & logs | Native AWS monitoring tool; configurable metric alarms eliminate the need for custom processing code in this controlled environment |
-| **SNS** | Alert notifications | Delivers email/SMS alerts when CloudWatch thresholds are exceeded |
-
----
-
-## 📡 Sensor Data Schema
-
-Each IoT device publishes JSON payloads to AWS IoT Core on the topic `leaksense/data`:
-
-```json
-{
-  "device_id": "node-001",
-  "timestamp": "2026-03-01T14:23:00Z",
-  "moisture": 72.4,
-  "temperature": 21.3,
-  "vibration": 0.12,
-  "acoustic": 340.5,
-}
-```
-
-**Field Descriptions:**
-- `moisture` – relative humidity/moisture percentage near the sensor node
-- `temperature` – ambient temperature in Celsius
-- `vibration` – vibration intensity (g-force units)
-- `acoustic` – sound frequency reading in Hz (pipe resonance detection)
-- `location` – human-readable label for the sensor's physical placement
-
----
-
-## 🚨 Alert Logic
-
-CloudWatch Metric Alarms evaluate sensor data against threshold rules and trigger SNS notifications when conditions are met:
-
-| Condition | Threshold | Action |
-|---|---|---|
-| High moisture | `moisture > 80%` | Trigger alert |
-| Temperature spike | `temp change > 5°C in 60s` | Trigger alert |
-| Acoustic anomaly | `acoustic > 500 Hz sustained` | Trigger alert |
-| Combined signal | Any 2+ thresholds crossed | High-priority alert |
-
-> **Note:** The system uses rule-based threshold detection rather than ML for this controlled environment. This keeps the pipeline reliable and debuggable for a single-semester project. ML-based detection is scoped as future work for more complex, multi-building deployments.
-
----
-
-## 📁 Repository Structure
+After the init process completes and the virtualenv is created, you can use the following
+step to activate your virtualenv.
 
 ```
-practicum-leak-detection/
-├── iot-core/
-│   ├── device-certs/          # Certificate files for ESP32 auth (not committed — see .gitignore)
-│   ├── thing-policy.json      # AWS IoT Core device policy definition
-│   └── iot-rules.json         # Rules Engine configuration (DynamoDB routing)
-│
-├── dynamodb/
-│   └── table-schema.json      # DynamoDB table definition and key structure
-│
-├── esp32/
-│   ├── sensor_publisher.ino   # Arduino sketch for MQTT publishing from ESP32
-│   └── config.h               # WiFi/broker config (not committed — see .gitignore)
-│
-├── dashboard/
-│   └── [visualization files]  # Web dashboard source (in development)
-│
-├── docs/
-│   └── architecture.md        # Detailed architecture decision log
-│
-└── README.md
+$ source .venv/bin/activate
 ```
 
----
+If you are a Windows platform, you would activate the virtualenv like this:
 
-## ✅ Current Progress
+```
+% .venv\Scripts\activate.bat
+```
 
-- [x] AWS IoT Core provisioned with device certificates
-- [x] DynamoDB table configured with correct key schema
-- [x] IoT Rules Engine routing MQTT → DynamoDB
-- [x] End-to-end MQTT → IoT Core → DynamoDB pipeline tested
-- [ ] Make the Infrastructure into Code using AWS CDK.
-- [ ] CloudWatch metric alarms configured for threshold detection
-- [ ] SNS alert delivery integration
-- [ ] CloudWatch dashboards
-- [ ] Web visualization dashboard
-- [ ] Integration with Engineering team's physical sensor dataset
+Once the virtualenv is activated, you can install the required dependencies.
 
----
+```
+$ pip install -r requirements.txt
+```
 
-## 🔐 Security Practices
+At this point you can now synthesize the CloudFormation template for this code.
 
-- IAM user with least-privilege permissions (no root account usage)
-- Certificate-based mutual TLS authentication for all IoT devices
-- Device policies scoped to specific MQTT topics only
-- Secrets (certificates, WiFi credentials) excluded from version control via `.gitignore`
+```
+$ cdk synth
+```
 
----
+To add additional dependencies, for example other CDK libraries, just add
+them to your `requirements.txt` file and rerun the `python -m pip install -r requirements.txt`
+command.
 
-## 🔗 Related Resources
+## Useful commands
 
-- [Project Wiki](../../wiki) — Full technical report, architecture decisions, and results
-- [GitHub Project Board](../../projects) — Milestone tracking and task assignments
-- [Foundation Project Team](../foundation-project/) — Engineering team's sensor and edge AI repository
+ * `cdk ls`          list all stacks in the app
+ * `cdk synth`       emits the synthesized CloudFormation template
+ * `cdk deploy`      deploy this stack to your default AWS account/region
+ * `cdk diff`        compare deployed stack with current state
+ * `cdk docs`        open CDK documentation
 
----
-
-*Spring 2026 — Engineering & Cybersecurity Systems | CSEC 4390*
+Enjoy!

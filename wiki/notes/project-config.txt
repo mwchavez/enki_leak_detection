@@ -1,0 +1,6 @@
+IoT Endpoint: xxxxxxxxxxxxxxxxxxxxx
+AWS Region: xx-xxxx-x
+
+cdk deploy --parameters CertArnNode01=arn:aws:iot:xxxxxxxxxxx~ --parameters CertArnNode02=arn:aws:iot:xxxxxxxxxxxxx~ --parameters AlertEmail=xxxxxx@xxxxx.com
+
+cdk deploy --parameters CertArnNode01=arn:aws:iot:xxxxxxxxxxxx~ --parameters CertArnNode02=arn:aws:iot:xxxxxxxxxxxxxx~ --parameters AlertEmail=xxxxxxxx@xxxxxx.com
