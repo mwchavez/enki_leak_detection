@@ -1,0 +1,45 @@
+Leak Tests
+
+NO LEAK:
+moisture: (4:07 - 4:23)
+Min:    45.2
+Max:    51.8
+Avg:    48.671473354
+
+temperature: (4:07 - 4:23)
+Min:    28.3
+Max:    30.5
+Avg:    29.246708464
+
+acoustic: (4:07 - 4:23)
+Min:    11,031.39
+Max:    27,030.67
+Avg:    17,406.984389
+
+vibration: (4:07 - 4:23)
+Min:   0
+Max:   256
+Avg:   7.2539184953
+
+
+LEAK:
+
+moisture: (4:28 - 4:45)
+Min:    38.9
+Max:    55.9
+Avg:    47.1045
+
+temperature: (4:28 - 4:45)
+Min:    28
+Max:    31.9
+Avg:    30.259333333
+
+acoustic: (4:28 - 4:45)
+Min:    10,289.02
+Max:    30,931.4
+Avg:    19,277.115133
+
+vibration: (4:28 - 4:45)
+Min:   0
+Max:   256
+Avg:   5.5583333333 

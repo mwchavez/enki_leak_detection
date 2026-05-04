@@ -1,0 +1,20 @@
+{
+  "version": "53.0.0",
+  "files": {
+    "2abfaa5e29086d4a079e6a7a8052d8090bde75548593954cf211f328b8ead256": {
+      "displayName": "LeakDetectionStack Template",
+      "source": {
+        "path": "LeakDetectionStack.template.json",
+        "packaging": "file"
+      },
+      "destinations": {
+        "current_account-current_region-355574c4": {
+          "bucketName": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}",
+          "objectKey": "2abfaa5e29086d4a079e6a7a8052d8090bde75548593954cf211f328b8ead256.json",
+          "assumeRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-file-publishing-role-${AWS::AccountId}-${AWS::Region}"
+        }
+      }
+    }
+  },
+  "dockerImages": {}
+}
