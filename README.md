@@ -229,7 +229,7 @@ enki-leak-detection/
 - [x] Device certificates migrated to AWS Secrets Manager
 - [x] Baseline characterization & threshold tuning (April 22–23 testing)
 - [x] End-user dashboard concept (homeowner-facing UI prototype)
-- [ ] Refinement
+- [x] Refinement
 
 ### Hardware & Sensors (Andres, Carolina)
 - [x] Sensor data sheets compiled
@@ -239,7 +239,7 @@ enki-leak-detection/
 - [x] Pipe-clamp ("clam") fixtures fabricated and deployed
 - [x] Handheld device CAD design
 - [x] Handheld device assembly
-- [ ] Refinement
+- [x] Refinement
 
 ### ML Model (Ethan)
 - [x] Fake dataset generator for training
@@ -248,7 +248,7 @@ enki-leak-detection/
 - [x] Embedded AI deployment on ESP32-S3
 - [x] Handheld integration and field testing
 - [x] Multi-session test data collection (no-leak baselines + leak simulation)
-- [ ] Refinement
+- [x] Refinement
 
 ---
 
