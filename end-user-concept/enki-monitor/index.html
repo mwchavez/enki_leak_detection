@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enki Monitor</title>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Canvas Gauges CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-gauges/gauge.min.js"></script>
+    <style>
+        :root {
+            --bg-neutral: #f8fafc;
+            --text-main: #1e293b;
+            --enki-blue: #3b82f6;
+            --enki-blue-dark: #1d4ed8;
+            --enki-blue-light: #dbeafe;
+            --success-green: #22c55e;
+            --warning-yellow: #eab308;
+            --error-red: #ef4444;
+            --card-bg: #ffffff;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-neutral);
+            color: var(--text-main);
+            margin: 0;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 900px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        header {
+            text-align: left;
+            border-bottom: 2px solid var(--enki-blue-light);
+            padding-bottom: 1rem;
+        }
+
+        h1 {
+            margin: 0;
+            color: var(--enki-blue);
+            font-size: 2.5rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+        }
+
+        .timestamp {
+            font-size: 0.875rem;
+            color: #64748b;
+            margin-top: 0.25rem;
+        }
+
+        .node-selector-container {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-top: 0.5rem;
+        }
+
+        .node-selector-container label {
+            font-weight: 600;
+            font-size: 0.875rem;
+            color: #475569;
+        }
+
+        select {
+            padding: 0.4rem 0.75rem;
+            border-radius: 0.5rem;
+            border: 1px solid #cbd5e1;
+            background-color: white;
+            font-size: 0.875rem;
+            color: var(--text-main);
+            outline: none;
+            cursor: pointer;
+        }
+
+        select:focus {
+            border-color: var(--enki-blue);
+            box-shadow: 0 0 0 2px var(--enki-blue-light);
+        }
+
+        .gauge-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.5rem;
+        }
+
+        @media (min-width: 768px) {
+            .gauge-grid {
+                grid-template-columns: repeat(4, 1fr);
+            }
+        }
+
+        .gauge-card {
+            background: var(--card-bg);
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            padding: 1.25rem;
+            border: 2px solid transparent;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .gauge-card:hover {
+            border-color: var(--enki-blue-light);
+            transform: translateY(-2px);
+        }
+
+        .gauge-card.active {
+            border-color: var(--enki-blue);
+            box-shadow: 0 10px 15px -3px rgba(59, 130, 246, 0.2);
+        }
+
+        .gauge-label {
+            font-weight: 700;
+            font-size: 0.9rem;
+            color: #475569;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .gauge-canvas-container {
+            width: 150px;
+            height: 150px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            padding: 1.5rem;
+            border: 1px solid #e2e8f0;
+        }
+
+        .chart-title {
+            font-weight: 700;
+            font-size: 1.1rem;
+            color: #475569;
+            margin-bottom: 1rem;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 250px;
+            width: 100%;
+        }
+
+        .consensus-block {
+            padding: 2rem;
+            border-radius: 1rem;
+            text-align: center;
+            font-size: 1.5rem;
+            font-weight: 700;
+            transition: all 0.3s ease;
+            color: white;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .consensus-no-leak {
+            background-color: var(--success-green);
+            box-shadow: 0 10px 15px -3px rgba(34, 197, 94, 0.3);
+        }
+
+        .consensus-leak {
+            background-color: var(--error-red);
+            box-shadow: 0 10px 15px -3px rgba(239, 68, 68, 0.3);
+        }
+
+        .demo-mode {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            border-top: 1px solid #e2e8f0;
+            width: 100%;
+            text-align: center;
+        }
+
+        .demo-mode-title {
+            font-weight: 700;
+            font-size: 0.875rem;
+            color: #64748b;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .demo-mode-note {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            margin-bottom: 1rem;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+        }
+
+        button {
+            padding: 0.5rem 1.25rem;
+            border-radius: 0.5rem;
+            border: 1px solid var(--enki-blue);
+            background: transparent;
+            color: var(--enki-blue);
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: var(--enki-blue-light);
+        }
+
+        button.active {
+            background: var(--enki-blue);
+            color: white;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <h1>Enki Monitor</h1>
+            <div id="last-updated" class="timestamp">Last updated: Loading...</div>
+            <div class="node-selector-container">
+                <label for="node-selector">Sensor Location:</label>
+                <select id="node-selector">
+                    <option value="node-01">node-01 (Kitchen)</option>
+                    <option value="node-02">node-02 (Water Heater)</option>
+                    <option value="node-03">node-03 (Bathroom)</option>
+                </select>
+            </div>
+        </header>
+
+        <div class="gauge-grid">
+            <div id="card-moisture" class="gauge-card active">
+                <div class="gauge-label">Moisture</div>
+                <div class="gauge-canvas-container">
+                    <canvas id="gauge-moisture"></canvas>
+                </div>
+            </div>
+            <div id="card-temperature" class="gauge-card">
+                <div class="gauge-label">Temperature</div>
+                <div class="gauge-canvas-container">
+                    <canvas id="gauge-temp"></canvas>
+                </div>
+            </div>
+            <div id="card-vibration" class="gauge-card">
+                <div class="gauge-label">Vibration</div>
+                <div class="gauge-canvas-container">
+                    <canvas id="gauge-vibration"></canvas>
+                </div>
+            </div>
+            <div id="card-acoustic" class="gauge-card">
+                <div class="gauge-label">Acoustic</div>
+                <div class="gauge-canvas-container">
+                    <canvas id="gauge-acoustic"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div id="trend-chart-title" class="chart-title">Moisture – Last 24 Hours</div>
+            <div class="chart-container">
+                <canvas id="trendChart"></canvas>
+            </div>
+            <div class="legend-info" style="font-size: 0.75rem; color: #94a3b8; margin-top: 1rem; text-align: center;">
+                Thresholds: Moisture &gt; 80% | Temp &lt; 10°C | Acoustic &gt; 500Hz | Vibration &gt; 0.3g
+            </div>
+        </div>
+
+        <div id="consensus-block" class="consensus-block consensus-no-leak">
+            Consensus: No Leak
+        </div>
+
+        <div class="demo-mode">
+            <div class="demo-mode-title">Demo Mode</div>
+            <div class="demo-mode-note">For demonstration purposes — toggle to preview alert state.</div>
+            <div class="controls">
+                <button id="btn-normal" class="active">Normal State</button>
+                <button id="btn-leak">Leak State</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- STATE ---
+        let selectedMetric = 'moisture';
+        let currentIsLeak = false;
+        let selectedNode = 'node-01';
+
+        const metricConfigs = {
+            moisture: { title: 'Moisture', unit: '%', min: 0, max: 100, color: '#3b82f6' },
+            temperature: { title: 'Temperature', unit: '°C', min: 0, max: 40, color: '#f59e0b' },
+            vibration: { title: 'Vibration', unit: 'g', min: 0, max: 1, color: '#8b5cf6' },
+            acoustic: { title: 'Acoustic', unit: 'Hz', min: 0, max: 1000, color: '#06b6d4' }
+        };
+
+        const nodeConfigs = {
+            'node-01': {
+                name: 'Kitchen',
+                baselines: { moisture: 40, temperature: 20, vibration: 0.1, acoustic: 200 },
+                bursts: { moisture: 98, temperature: 2, vibration: 0.95, acoustic: 980 }
+            },
+            'node-02': {
+                name: 'Water Heater',
+                baselines: { moisture: 50, temperature: 28, vibration: 0.15, acoustic: 260 },
+                bursts: { moisture: 100, temperature: 5, vibration: 0.98, acoustic: 995 }
+            },
+            'node-03': {
+                name: 'Bathroom',
+                baselines: { moisture: 55, temperature: 22, vibration: 0.08, acoustic: 180 },
+                bursts: { moisture: 96, temperature: 3, vibration: 0.9, acoustic: 970 }
+            }
+        };
+
+        // --- DATA GENERATION ---
+        const generateData = (isLeak, nodeId) => {
+            const data = [];
+            const now = Math.floor(Date.now() / 1000);
+            const interval = 30 * 60; // 30 minutes in seconds
+            const points = 48; // 24 hours
+            const burstPoint = 1; // Burst happens in the last 30 minutes (last 1 point)
+            
+            const node = nodeConfigs[nodeId];
+
+            for (let i = points; i >= 0; i--) {
+                const timestamp = now - (i * interval);
+                
+                let moisture, temperature, vibration, acoustic;
+
+                if (isLeak && i <= burstPoint) {
+                    // Extreme Burst Values (Pinned needles, varying slightly per node)
+                    moisture = node.bursts.moisture;
+                    temperature = node.bursts.temperature;
+                    vibration = node.bursts.vibration;
+                    acoustic = node.bursts.acoustic;
+                } else {
+                    // Flat Baseline Values (Minimal variation, specific per node)
+                    moisture = node.baselines.moisture + (Math.random() * 0.8);
+                    temperature = node.baselines.temperature + (Math.random() * 0.3);
+                    vibration = node.baselines.vibration + (Math.random() * 0.02);
+                    acoustic = node.baselines.acoustic + (Math.random() * 8);
+                }
+
+                data.push({
+                    device_id: nodeId,
+                    timestamp: timestamp,
+                    moisture: parseFloat(moisture.toFixed(1)),
+                    temperature: parseFloat(temperature.toFixed(1)),
+                    vibration: parseFloat(vibration.toFixed(2)),
+                    acoustic: parseFloat(acoustic.toFixed(1))
+                });
+            }
+            return data;
+        };
+
+        // --- GAUGE INITIALIZATION ---
+        const createGauge = (id, title, units, min, max, highlights, value) => {
+            return new RadialGauge({
+                renderTo: id,
+                width: 150,
+                height: 150,
+                units: units,
+                minValue: min,
+                maxValue: max,
+                value: value,
+                majorTicks: [min, (max/2), max],
+                minorTicks: 2,
+                strokeTicks: true,
+                highlights: highlights,
+                colorPlate: "#fff",
+                borderShadowWidth: 0,
+                borders: false,
+                needleType: "arrow",
+                needleWidth: 2,
+                needleCircleSize: 7,
+                needleCircleOuter: true,
+                needleCircleInner: false,
+                animation: false, // Internal animation off to ensure immediate redraw
+                valueBox: true,
+                valueInt: 1,
+                valueDec: 1,
+                fontValueSize: 35,
+                fontUnitsSize: 20,
+                colorValueBoxRect: "transparent",
+                colorValueBoxRectEnd: "transparent",
+                colorValueBoxBackground: "transparent",
+                colorValueText: "#1e293b",
+                colorUnits: "#64748b"
+            }).draw();
+        };
+
+        let gaugeMoisture, gaugeTemp, gaugeVibration, gaugeAcoustic;
+
+        const initGauges = (latest) => {
+            // Destroy existing instances to prevent clipping and memory leaks
+            if (gaugeMoisture) gaugeMoisture.destroy();
+            if (gaugeTemp) gaugeTemp.destroy();
+            if (gaugeVibration) gaugeVibration.destroy();
+            if (gaugeAcoustic) gaugeAcoustic.destroy();
+
+            gaugeMoisture = createGauge('gauge-moisture', 'Moisture', '%', 0, 100, [
+                { from: 0, to: 70, color: "rgba(34, 197, 94, .75)" },
+                { from: 70, to: 85, color: "rgba(234, 179, 8, .75)" },
+                { from: 85, to: 100, color: "rgba(239, 68, 68, .75)" }
+            ], latest.moisture);
+            gaugeTemp = createGauge('gauge-temp', 'Temp', '°C', 0, 40, [
+                { from: 0, to: 10, color: "rgba(239, 68, 68, .75)" },
+                { from: 10, to: 15, color: "rgba(234, 179, 8, .75)" },
+                { from: 15, to: 40, color: "rgba(34, 197, 94, .75)" }
+            ], latest.temperature);
+            gaugeVibration = createGauge('gauge-vibration', 'Vib', 'g', 0, 1, [
+                { from: 0, to: 0.2, color: "rgba(34, 197, 94, .75)" },
+                { from: 0.2, to: 0.4, color: "rgba(234, 179, 8, .75)" },
+                { from: 0.4, to: 1, color: "rgba(239, 68, 68, .75)" }
+            ], latest.vibration);
+            gaugeAcoustic = createGauge('gauge-acoustic', 'Freq', 'Hz', 0, 1000, [
+                { from: 0, to: 400, color: "rgba(34, 197, 94, .75)" },
+                { from: 400, to: 700, color: "rgba(234, 179, 8, .75)" },
+                { from: 700, to: 1000, color: "rgba(239, 68, 68, .75)" }
+            ], latest.acoustic);
+        };
+
+        // --- TREND CHART ---
+        let trendChart;
+        const trendCtx = document.getElementById('trendChart').getContext('2d');
+
+        const updateDashboard = () => {
+            const data = generateData(currentIsLeak, selectedNode);
+            const latest = data[data.length - 1];
+
+            // Update Gauges (Full re-render to fix clipping bug)
+            initGauges(latest);
+
+            // Update Trend Chart
+            const config = metricConfigs[selectedMetric];
+            document.getElementById('trend-chart-title').textContent = `${config.title} – Last 24 Hours`;
+
+            const labels = data.map(d => {
+                const date = new Date(d.timestamp * 1000);
+                return date.getHours() + ":" + (date.getMinutes() < 10 ? '0' : '') + date.getMinutes();
+            });
+
+            if (trendChart) {
+                trendChart.destroy();
+            }
+
+            trendChart = new Chart(trendCtx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: `${config.title} (${config.unit})`,
+                        data: data.map(d => d[selectedMetric]),
+                        borderColor: config.color,
+                        backgroundColor: `${config.color}1a`,
+                        fill: true,
+                        tension: 0, // Vertical burst exactly
+                        pointRadius: 0,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animations: false,
+                    scales: {
+                        y: {
+                            min: config.min,
+                            max: config.max,
+                            title: { display: true, text: config.unit }
+                        },
+                        x: {
+                            ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false }
+                    }
+                }
+            });
+
+            // Update Consensus Block
+            const block = document.getElementById('consensus-block');
+            const hasLeak = latest.moisture > 85 || latest.temperature < 10 || latest.vibration > 0.4 || latest.acoustic > 700;
+            
+            if (hasLeak) {
+                block.textContent = "Consensus: Leak Detected";
+                block.className = "consensus-block consensus-leak";
+            } else {
+                block.textContent = "Consensus: No Leak";
+                block.className = "consensus-block consensus-no-leak";
+            }
+
+            // Update Timestamp
+            const now = new Date();
+            document.getElementById('last-updated').textContent = `Last updated: ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
+        };
+
+        const selectMetric = (metric) => {
+            selectedMetric = metric;
+            // Update UI highlight
+            document.querySelectorAll('.gauge-card').forEach(card => card.classList.remove('active'));
+            document.getElementById(`card-${metric}`).classList.add('active');
+            updateDashboard();
+        };
+
+        // --- INITIALIZATION & EVENTS ---
+        document.addEventListener('DOMContentLoaded', () => {
+            updateDashboard();
+
+            // Gauge card clicks
+            document.getElementById('card-moisture').addEventListener('click', () => selectMetric('moisture'));
+            document.getElementById('card-temperature').addEventListener('click', () => selectMetric('temperature'));
+            document.getElementById('card-vibration').addEventListener('click', () => selectMetric('vibration'));
+            document.getElementById('card-acoustic').addEventListener('click', () => selectMetric('acoustic'));
+
+            document.getElementById('btn-normal').addEventListener('click', () => {
+                currentIsLeak = false;
+                updateDashboard();
+                document.getElementById('btn-normal').classList.add('active');
+                document.getElementById('btn-leak').classList.remove('active');
+            });
+
+            document.getElementById('btn-leak').addEventListener('click', () => {
+                currentIsLeak = true;
+                updateDashboard();
+                document.getElementById('btn-leak').classList.add('active');
+                document.getElementById('btn-normal').classList.remove('active');
+            });
+
+            // Node selector (concept only)
+            document.getElementById('node-selector').addEventListener('change', (e) => {
+                selectedNode = e.target.value;
+                updateDashboard();
+            });
+        });
+    </script>
+</body>
+</html>
