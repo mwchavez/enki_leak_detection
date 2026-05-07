@@ -1,0 +1,5 @@
+{
+  "name": "Enki Monitor",
+  "description": "Conceptual end-user dashboard for the Enki leak detection system, featuring real-time sensor visualization and leak consensus status.",
+  "requestFramePermissions": []
+}
