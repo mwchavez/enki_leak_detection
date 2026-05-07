@@ -281,11 +281,11 @@ enki-leak-detection/
 
 | Team Member | Total Story Points Completed | Contribution % |
 |---|---|---|
-| Moses Chavez | 35 | **37.6%** |
-| Andres Varela | 23 | **24.7%** |
-| Ethan Garcia | 24 | **25.8%** |
-| Carolina Flores | 11 | **11.8%** |
-| **Team Total** | 93 | **100.0%** |
+| Moses Chavez | 123 | **34.6%** |
+| Andres Varela | 93 | **26.1%** |
+| Ethan Garcia | 95 | **26.7%** |
+| Carolina Flores | 45 | **12.6%** |
+| **Team Total** | 356 | **100.0%** |
 
 ---
 
