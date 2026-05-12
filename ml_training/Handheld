@@ -1,0 +1,1034 @@
+#include <Arduino.h>
+#include <Wire.h>
+#include <driver/i2s.h>
+#include <math.h>
+
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <Adafruit_BME680.h>
+
+#include <TensorFlowLite_ESP32.h>
+#include "tensorflow/lite/micro/all_ops_resolver.h"
+#include "tensorflow/lite/micro/micro_error_reporter.h"
+#include "tensorflow/lite/micro/micro_interpreter.h"
+#include "tensorflow/lite/schema/schema_generated.h"
+
+#include "leak_model_data.h"
+#include "scaler_params.h"
+
+#define TENSOR_ARENA_SIZE (40 * 1024)
+
+#define I2S_WS_PIN 25
+#define I2S_SCK_PIN 26
+#define I2S_SD_PIN 33
+#define I2S_PORT I2S_NUM_0
+#define SAMPLE_RATE 16000
+#define WINDOW_SAMPLES 128
+#define I2S_READ_TIMEOUT_MS 200
+#define MIC_FAIL_RESET_COUNT 5
+
+#define GY61_X_PIN 34
+#define GY61_Y_PIN 35
+#define GY61_Z_PIN 32
+#define GY61_SAMPLE_BURST 8
+#define GY61_CALIBRATION_SAMPLES 64
+#define GY61_BASELINE_ALPHA 0.02f
+#define GY61_BASELINE_UPDATE_LIMIT 18.0f
+#define GY61_DELTA_SCALE 3.0f
+#define VIBRATION_FEATURE_ACTIVITY_DELTA 40
+#define VIBRATION_SUSTAIN_ALPHA 0.25f
+
+#define OLED_I2C_SDA_PIN 21
+#define OLED_I2C_SCL_PIN 22
+#define OLED_SCREEN_WIDTH 128
+#define OLED_SCREEN_HEIGHT 64
+#define OLED_RESET_PIN -1
+#define OLED_I2C_ADDRESS_PRIMARY 0x3C
+#define OLED_I2C_ADDRESS_SECONDARY 0x3D
+
+#define BME_I2C_SDA_PIN 18
+#define BME_I2C_SCL_PIN 19
+#define BME680_I2C_ADDRESS_PRIMARY 0x77
+#define BME680_I2C_ADDRESS_SECONDARY 0x76
+
+#define ENV_SAMPLE_INTERVAL_MS 1000
+#define DISPLAY_REFRESH_MS 250
+#define SERIAL_PRINT_MS 1000
+
+#define MODEL_LEAK_THRESHOLD 0.80f
+#define MIN_SOUND_LEVEL 9000.0f
+#define MIN_ZERO_CROSS_RATE 0.08f
+#define MAX_VALID_SOUND_LEVEL 32500.0f
+#define MAX_CLIPPED_SAMPLES 110
+#define HANDHELD_SMALL_LEAK_SOUND_MIN 11000.0f
+#define HANDHELD_SMALL_LEAK_SOUND_MAX 22000.0f
+#define HANDHELD_SMALL_LEAK_SPECTRAL_MIN 2500.0f
+#define HANDHELD_SMALL_LEAK_ZERO_CROSS_MIN 0.18f
+#define HANDHELD_SMALL_LEAK_PROB_MIN 0.25f
+#define HANDHELD_SMALL_LEAK_SOFT_SPECTRAL_MIN 2400.0f
+#define HANDHELD_SMALL_LEAK_SOFT_ZERO_CROSS_MIN 0.155f
+#define HANDHELD_SMALL_LEAK_SOFT_PROB_MIN 0.06f
+#define HANDHELD_LARGE_LEAK_SOUND_MIN 18500.0f
+#define HANDHELD_LARGE_LEAK_SPECTRAL_MIN 2700.0f
+#define HANDHELD_LARGE_LEAK_ZERO_CROSS_MIN 0.18f
+#define HANDHELD_LARGE_LEAK_PROB_MIN 0.45f
+#define HANDHELD_LARGE_LEAK_VIBRATION_MIN 650
+#define HANDHELD_LARGE_LEAK_ASSIST_PROB_MIN 0.25f
+#define HANDHELD_MEDIUM_LEAK_SOUND_MIN 22000.0f
+#define HANDHELD_MEDIUM_LEAK_SPECTRAL_MIN 2350.0f
+#define HANDHELD_MEDIUM_LEAK_ZERO_CROSS_MIN 0.16f
+#define HANDHELD_MEDIUM_LEAK_PROB_MIN 0.10f
+#define HANDHELD_MEDIUM_LEAK_VIBRATION_MIN 500
+#define HANDHELD_MEDIUM_LEAK_ASSIST_SOUND_MIN 20000.0f
+#define HANDHELD_MEDIUM_LEAK_ASSIST_SPECTRAL_MIN 2500.0f
+#define HANDHELD_MEDIUM_LEAK_ASSIST_ZERO_CROSS_MIN 0.18f
+#define HANDHELD_MEDIUM_LEAK_ASSIST_PROB_MIN 0.15f
+#define HANDHELD_MEDIUM_LEAK_ASSIST_VIBRATION_MIN 600
+#define HANDHELD_MEDIUM_LEAK_ASSIST_VIBRATION_MAX 950
+#define VIBRATION_PRIMARY_LEAK_DELTA_MIN 650
+#define VIBRATION_PRIMARY_LEAK_MEAN_MIN 500.0f
+#define VIBRATION_PRIMARY_LEAK_SUSTAIN_MIN 500.0f
+#define VIBRATION_PRIMARY_LEAK_SPECTRAL_MIN 2350.0f
+#define VIBRATION_PRIMARY_LEAK_ZERO_CROSS_MIN 0.15f
+#define VIBRATION_PRIMARY_LEAK_PROB_MIN 0.08f
+#define VIBRATION_PRIMARY_LARGE_DELTA_MIN 900
+#define VIBRATION_PRIMARY_LARGE_MEAN_MIN 700.0f
+#define VIBRATION_PRIMARY_LARGE_SUSTAIN_MIN 650.0f
+#define VIBRATION_PRIMARY_LARGE_SPECTRAL_MIN 2700.0f
+#define VIBRATION_PRIMARY_LARGE_ZERO_CROSS_MIN 0.20f
+#define VIBRATION_PRIMARY_LARGE_PROB_MIN 0.50f
+#define ACOUSTIC_PRIMARY_LEAK_SOUND_MIN 18000.0f
+#define ACOUSTIC_PRIMARY_LEAK_SPECTRAL_MIN 2500.0f
+#define ACOUSTIC_PRIMARY_LEAK_ZERO_CROSS_MIN 0.17f
+#define ACOUSTIC_PRIMARY_LEAK_PROB_MIN 0.18f
+#define ACOUSTIC_PRIMARY_LARGE_SOUND_MIN 17000.0f
+#define ACOUSTIC_PRIMARY_LARGE_SPECTRAL_MIN 2700.0f
+#define ACOUSTIC_PRIMARY_LARGE_ZERO_CROSS_MIN 0.20f
+#define ACOUSTIC_PRIMARY_LARGE_PROB_MIN 0.35f
+#define ACOUSTIC_IMPACT_REJECT_SOUND_MAX 24000.0f
+#define ACOUSTIC_IMPACT_REJECT_SPECTRAL_MIN 3600.0f
+#define ACOUSTIC_IMPACT_REJECT_ZERO_CROSS_MIN 0.40f
+#define ACOUSTIC_IMPACT_REJECT_PROB_MIN 0.995f
+#define ACOUSTIC_SUPPORT_VIBRATION_DELTA_MIN 550
+#define ACOUSTIC_SUPPORT_VIBRATION_MEAN_MIN 450.0f
+#define ACOUSTIC_SUPPORT_VIBRATION_SUSTAIN_MIN 500.0f
+#define ACOUSTIC_SUPPORT_LEAK_MEAN_MAX 950.0f
+#define ACOUSTIC_SUPPORT_LEAK_SUSTAIN_MAX 950.0f
+#define ACOUSTIC_SUPPORT_LARGE_VIBRATION_DELTA_MIN 800
+#define ACOUSTIC_SUPPORT_LARGE_VIBRATION_MEAN_MIN 650.0f
+#define ACOUSTIC_SUPPORT_LARGE_VIBRATION_SUSTAIN_MIN 650.0f
+#define CONTACT_TRANSIENT_TREND_MAX 400.0f
+#define CONTACT_TRANSIENT_VARIANCE_MAX 5000.0f
+#define SMALL_LEAK_CONFIRM_FRAMES 3
+#define MEDIUM_LEAK_CONFIRM_FRAMES 1
+#define LARGE_LEAK_CONFIRM_FRAMES 2
+#define LARGE_LEAK_RELEASE_FRAMES 3
+#define LARGE_TO_NONE_CLEAR_FRAMES 2
+#define LEAK_CLEAR_FRAMES 12
+#define STARTUP_STABILIZE_MS 5000UL
+
+enum LeakLevel {
+  LEAK_LEVEL_NONE = 0,
+  LEAK_LEVEL_SMALL = 1,
+  LEAK_LEVEL_MEDIUM = 2,
+  LEAK_LEVEL_LARGE = 3
+};
+
+static tflite::MicroErrorReporter microErrorReporter;
+static tflite::AllOpsResolver resolver;
+static uint8_t tensorArena[TENSOR_ARENA_SIZE];
+static tflite::MicroInterpreter* interpreter = nullptr;
+
+Adafruit_SSD1306 display(
+  OLED_SCREEN_WIDTH,
+  OLED_SCREEN_HEIGHT,
+  &Wire,
+  OLED_RESET_PIN
+);
+
+TwoWire bmeWire = TwoWire(1);
+Adafruit_BME680 bme680(&bmeWire);
+
+static int32_t rawSamples[WINDOW_SAMPLES];
+static int16_t audioI16[WINDOW_SAMPLES];
+static int clippedSampleCount = 0;
+static int micReadFailCount = 0;
+
+static const int gy61Pins[3] = {GY61_X_PIN, GY61_Y_PIN, GY61_Z_PIN};
+static int gy61Baseline[3] = {0, 0, 0};
+static int gy61LastRaw[3] = {0, 0, 0};
+
+static bool oledReady = false;
+static bool bmeReady = false;
+
+static unsigned long lastEnvSampleMs = 0;
+static unsigned long lastDisplayRefreshMs = 0;
+static unsigned long lastSerialPrintMs = 0;
+
+static float envTemperatureC = NAN;
+static float envHumidityPct = NAN;
+
+static float soundLevel = 0.0f;
+static float peakFrequencyHz = 0.0f;
+static float spectralCenterHz = 0.0f;
+static float zeroCrossRate = 0.0f;
+static float modelScore = 0.0f;
+static LeakLevel leakLevel = LEAK_LEVEL_NONE;
+static LeakLevel rawLeakLevel = LEAK_LEVEL_NONE;
+static int smallLeakConfirmCount = 0;
+static int mediumLeakConfirmCount = 0;
+static int largeLeakConfirmCount = 0;
+static int largeLeakReleaseCount = 0;
+static int leakClearCount = 0;
+static unsigned long stabilizeUntilMs = 0;
+
+static int vibrationLastDelta = 0;
+static float vibrationMeanFeature = 0.0f;
+static float vibrationVarianceFeature = 0.0f;
+static float vibrationTrendFeature = 0.0f;
+static float vibrationSustainFeature = 0.0f;
+static float previousVibrationMeanFeature = 0.0f;
+
+const char* leakLevelLabel(LeakLevel level) {
+  switch (level) {
+    case LEAK_LEVEL_SMALL:
+      return "LEAK";
+    case LEAK_LEVEL_MEDIUM:
+      return "LEAK";
+    case LEAK_LEVEL_LARGE:
+      return "LARGE";
+    default:
+      return "NO LEAK";
+  }
+}
+
+void setupModel() {
+  const tflite::Model* model = tflite::GetModel(g_leak_model_data);
+
+  static tflite::MicroInterpreter staticInterpreter(
+    model,
+    resolver,
+    tensorArena,
+    TENSOR_ARENA_SIZE,
+    &microErrorReporter
+  );
+
+  interpreter = &staticInterpreter;
+  if (interpreter->AllocateTensors() != kTfLiteOk) {
+    Serial.println("AllocateTensors failed");
+    while (true) {
+      delay(1000);
+    }
+  }
+}
+
+void clearLeakState() {
+  leakLevel = LEAK_LEVEL_NONE;
+  rawLeakLevel = LEAK_LEVEL_NONE;
+  smallLeakConfirmCount = 0;
+  mediumLeakConfirmCount = 0;
+  largeLeakConfirmCount = 0;
+  largeLeakReleaseCount = 0;
+  leakClearCount = 0;
+}
+
+void runQuickReset() {
+  Serial.println("RESET: clearing leak state and recalibrating");
+  clearLeakState();
+  lastDisplayRefreshMs = 0;
+  lastSerialPrintMs = 0;
+
+  if (oledReady) {
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.setTextSize(1);
+    display.println("Quick reset");
+    display.println("Recalibrating...");
+    display.display();
+  }
+
+  calibrateVibrationBaseline();
+  updateEnvironmentState();
+  stabilizeUntilMs = millis() + STARTUP_STABILIZE_MS;
+}
+
+bool handleSerialCommands() {
+  if (!Serial.available()) {
+    return false;
+  }
+
+  String command = Serial.readStringUntil('\n');
+  command.trim();
+  command.toLowerCase();
+
+  if (command == "r" || command == "reset" || command == "clear") {
+    runQuickReset();
+    return true;
+  }
+
+  return false;
+}
+
+void setupMic() {
+  const i2s_config_t i2sConfig = {
+    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
+    .sample_rate = SAMPLE_RATE,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
+    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+    .communication_format = I2S_COMM_FORMAT_I2S,
+    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+    .dma_buf_count = 4,
+    .dma_buf_len = 256,
+    .use_apll = false,
+    .tx_desc_auto_clear = false,
+    .fixed_mclk = 0
+  };
+
+  const i2s_pin_config_t pinConfig = {
+    .bck_io_num = I2S_SCK_PIN,
+    .ws_io_num = I2S_WS_PIN,
+    .data_out_num = I2S_PIN_NO_CHANGE,
+    .data_in_num = I2S_SD_PIN
+  };
+
+  i2s_driver_install(I2S_PORT, &i2sConfig, 0, nullptr);
+  i2s_set_pin(I2S_PORT, &pinConfig);
+  i2s_zero_dma_buffer(I2S_PORT);
+}
+
+bool readMicWindow() {
+  size_t bytesRead = 0;
+  esp_err_t result = i2s_read(
+    I2S_PORT,
+    rawSamples,
+    sizeof(rawSamples),
+    &bytesRead,
+    pdMS_TO_TICKS(I2S_READ_TIMEOUT_MS)
+  );
+
+  if (result != ESP_OK || bytesRead != sizeof(rawSamples)) {
+    micReadFailCount++;
+    if (micReadFailCount >= MIC_FAIL_RESET_COUNT) {
+      i2s_zero_dma_buffer(I2S_PORT);
+      micReadFailCount = 0;
+    }
+    return false;
+  }
+  micReadFailCount = 0;
+
+  long long sum = 0;
+  for (int i = 0; i < WINDOW_SAMPLES; i++) {
+    sum += rawSamples[i];
+  }
+  int32_t mean = (int32_t)(sum / WINDOW_SAMPLES);
+
+  clippedSampleCount = 0;
+  for (int i = 0; i < WINDOW_SAMPLES; i++) {
+    int32_t centered = rawSamples[i] - mean;
+    int32_t shifted = centered >> 8;
+    if (shifted > 32767) {
+      shifted = 32767;
+    }
+    if (shifted < -32768) {
+      shifted = -32768;
+    }
+    audioI16[i] = (int16_t)shifted;
+    if (abs((int)audioI16[i]) >= 32760) {
+      clippedSampleCount++;
+    }
+  }
+
+  return true;
+}
+
+float computeRms(const int16_t* audio) {
+  double sumSq = 0.0;
+  for (int i = 0; i < WINDOW_SAMPLES; i++) {
+    double value = (double)audio[i];
+    sumSq += value * value;
+  }
+  return (float)sqrt(sumSq / WINDOW_SAMPLES + 1e-12);
+}
+
+float computeZeroCrossingRate(const int16_t* audio) {
+  int crossings = 0;
+  for (int i = 1; i < WINDOW_SAMPLES; i++) {
+    bool previousPositive = audio[i - 1] >= 0;
+    bool currentPositive = audio[i] >= 0;
+    if (previousPositive != currentPositive) {
+      crossings++;
+    }
+  }
+  return (float)crossings / (float)(WINDOW_SAMPLES - 1);
+}
+
+void computeSpectralFeatures(
+  const int16_t* audio,
+  float& peakFrequency,
+  float& spectralCentroid,
+  float& lowBandEnergy,
+  float& midBandEnergy,
+  float& highBandEnergy
+) {
+  const int bins = WINDOW_SAMPLES / 2 + 1;
+  float maxMagnitude = -1.0f;
+  int peakIndex = 0;
+  float magnitudeSum = 0.0f;
+  float weightedSum = 0.0f;
+
+  lowBandEnergy = 0.0f;
+  midBandEnergy = 0.0f;
+  highBandEnergy = 0.0f;
+
+  for (int k = 0; k < bins; k++) {
+    double realPart = 0.0;
+    double imagPart = 0.0;
+
+    for (int n = 0; n < WINDOW_SAMPLES; n++) {
+      double angle =
+        -2.0 * PI * (double)k * (double)n / (double)WINDOW_SAMPLES;
+      realPart += (double)audio[n] * cos(angle);
+      imagPart += (double)audio[n] * sin(angle);
+    }
+
+    float magnitude = (float)sqrt(realPart * realPart + imagPart * imagPart);
+    float frequency = ((float)k * SAMPLE_RATE) / WINDOW_SAMPLES;
+    float power = magnitude * magnitude;
+
+    if (magnitude > maxMagnitude) {
+      maxMagnitude = magnitude;
+      peakIndex = k;
+    }
+
+    magnitudeSum += magnitude;
+    weightedSum += frequency * magnitude;
+
+    if (frequency < 1000.0f) {
+      lowBandEnergy += power;
+    } else if (frequency < 4000.0f) {
+      midBandEnergy += power;
+    } else if (frequency <= 8000.0f) {
+      highBandEnergy += power;
+    }
+  }
+
+  peakFrequency = ((float)peakIndex * SAMPLE_RATE) / WINDOW_SAMPLES;
+  spectralCentroid = magnitudeSum > 0.0f ? weightedSum / magnitudeSum : 0.0f;
+}
+
+void calibrateVibrationBaseline() {
+  long baselineSum[3] = {0, 0, 0};
+
+  for (int sample = 0; sample < GY61_CALIBRATION_SAMPLES; sample++) {
+    long burstSum[3] = {0, 0, 0};
+
+    for (int burst = 0; burst < GY61_SAMPLE_BURST; burst++) {
+      for (int axis = 0; axis < 3; axis++) {
+        burstSum[axis] += analogRead(gy61Pins[axis]);
+      }
+      delayMicroseconds(250);
+    }
+
+    for (int axis = 0; axis < 3; axis++) {
+      baselineSum[axis] += burstSum[axis] / GY61_SAMPLE_BURST;
+    }
+    delay(5);
+  }
+
+  for (int axis = 0; axis < 3; axis++) {
+    gy61Baseline[axis] = (int)(baselineSum[axis] / GY61_CALIBRATION_SAMPLES);
+    gy61LastRaw[axis] = gy61Baseline[axis];
+  }
+}
+
+void updateEngineeredVibrationFeatures(
+  float peakDelta,
+  float activeMean,
+  float variance,
+  float burstMean
+) {
+  vibrationLastDelta = (int)peakDelta;
+  vibrationMeanFeature = activeMean;
+  vibrationVarianceFeature = variance;
+
+  float trend = vibrationMeanFeature - previousVibrationMeanFeature;
+  vibrationTrendFeature = trend > 0.0f ? trend : 0.0f;
+  previousVibrationMeanFeature = vibrationMeanFeature;
+
+  vibrationSustainFeature =
+    (VIBRATION_SUSTAIN_ALPHA * burstMean) +
+    ((1.0f - VIBRATION_SUSTAIN_ALPHA) * vibrationSustainFeature);
+}
+
+void updateVibrationState() {
+  int localPeakDelta = 0;
+  float localDeltaSum = 0.0f;
+  float localActiveDeltaSum = 0.0f;
+  float localActiveDeltaSquareSum = 0.0f;
+  int localActiveCount = 0;
+
+  for (int sample = 0; sample < GY61_SAMPLE_BURST; sample++) {
+    int raw[3] = {0, 0, 0};
+    for (int axis = 0; axis < 3; axis++) {
+      raw[axis] = analogRead(gy61Pins[axis]);
+      gy61LastRaw[axis] = raw[axis];
+    }
+
+    float deltaMagnitudeSquared = 0.0f;
+    for (int axis = 0; axis < 3; axis++) {
+      int axisDelta = abs(raw[axis] - gy61Baseline[axis]);
+      deltaMagnitudeSquared += (float)axisDelta * (float)axisDelta;
+    }
+
+    float rawDeltaMagnitude = sqrtf(deltaMagnitudeSquared);
+    int scaledDelta = (int)lroundf(rawDeltaMagnitude * GY61_DELTA_SCALE);
+    localDeltaSum += scaledDelta;
+
+    if (scaledDelta > localPeakDelta) {
+      localPeakDelta = scaledDelta;
+    }
+
+    if (scaledDelta >= VIBRATION_FEATURE_ACTIVITY_DELTA) {
+      localActiveDeltaSum += scaledDelta;
+      localActiveDeltaSquareSum += (float)scaledDelta * (float)scaledDelta;
+      localActiveCount++;
+    }
+
+    if (rawDeltaMagnitude <= GY61_BASELINE_UPDATE_LIMIT) {
+      for (int axis = 0; axis < 3; axis++) {
+        gy61Baseline[axis] =
+          (int)((1.0f - GY61_BASELINE_ALPHA) * gy61Baseline[axis] +
+                GY61_BASELINE_ALPHA * raw[axis]);
+      }
+    }
+
+    delayMicroseconds(250);
+  }
+
+  float burstMean = localDeltaSum / GY61_SAMPLE_BURST;
+  float activeMean = 0.0f;
+  float variance = 0.0f;
+
+  if (localActiveCount > 0) {
+    activeMean = localActiveDeltaSum / localActiveCount;
+    float meanSquare = localActiveDeltaSquareSum / localActiveCount;
+    variance = meanSquare - (activeMean * activeMean);
+    if (variance < 0.0f) {
+      variance = 0.0f;
+    }
+  }
+
+  updateEngineeredVibrationFeatures(
+    (float)localPeakDelta,
+    activeMean,
+    variance,
+    burstMean
+  );
+}
+
+void setupI2CBuses() {
+  Wire.begin(OLED_I2C_SDA_PIN, OLED_I2C_SCL_PIN);
+  Wire.setClock(400000);
+
+  bmeWire.begin(BME_I2C_SDA_PIN, BME_I2C_SCL_PIN);
+  bmeWire.setClock(100000);
+}
+
+void setupDisplay() {
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDRESS_PRIMARY) &&
+      !display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDRESS_SECONDARY)) {
+    oledReady = false;
+    Serial.println("OLED init failed");
+    return;
+  }
+
+  oledReady = true;
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("Leak Detector");
+  display.println("Starting...");
+  display.display();
+}
+
+void setupEnvironmentSensor() {
+  if (!bme680.begin(BME680_I2C_ADDRESS_PRIMARY) &&
+      !bme680.begin(BME680_I2C_ADDRESS_SECONDARY)) {
+    bmeReady = false;
+    Serial.println("BME680 init failed");
+    return;
+  }
+
+  bmeReady = true;
+  bme680.setTemperatureOversampling(BME680_OS_8X);
+  bme680.setHumidityOversampling(BME680_OS_2X);
+  bme680.setPressureOversampling(BME680_OS_4X);
+  bme680.setIIRFilterSize(BME680_FILTER_SIZE_3);
+  bme680.setGasHeater(0, 0);
+}
+
+void updateEnvironmentState() {
+  if (!bmeReady) {
+    return;
+  }
+
+  unsigned long now = millis();
+  if (lastEnvSampleMs != 0 &&
+      now - lastEnvSampleMs < ENV_SAMPLE_INTERVAL_MS) {
+    return;
+  }
+
+  if (!bme680.performReading()) {
+    Serial.println("BME680 read failed");
+    lastEnvSampleMs = now;
+    return;
+  }
+
+  envTemperatureC = bme680.temperature;
+  envHumidityPct = bme680.humidity;
+  lastEnvSampleMs = now;
+}
+
+LeakLevel classifyLeak(
+  float probability,
+  float acoustic,
+  float spectralCenter,
+  float zcr,
+  int vibrationDelta,
+  float vibrationMean,
+  float vibrationSustain
+) {
+  bool signalFault =
+    (acoustic >= MAX_VALID_SOUND_LEVEL) ||
+    (clippedSampleCount >= MAX_CLIPPED_SAMPLES);
+
+  bool validAudio =
+    !signalFault &&
+    (acoustic >= MIN_SOUND_LEVEL) &&
+    (zcr >= MIN_ZERO_CROSS_RATE);
+
+  bool lowTextureBackground =
+    !signalFault &&
+    (spectralCenter < 2100.0f) &&
+    (zcr < 0.10f) &&
+    (probability < 0.02f);
+
+  bool vibrationSupport =
+    !signalFault &&
+    (
+      (vibrationDelta >= ACOUSTIC_SUPPORT_VIBRATION_DELTA_MIN) ||
+      (vibrationMean >= ACOUSTIC_SUPPORT_VIBRATION_MEAN_MIN) ||
+      (vibrationSustain >= ACOUSTIC_SUPPORT_VIBRATION_SUSTAIN_MIN)
+    );
+
+  bool vibrationLargeSupport =
+    !signalFault &&
+    (
+      (vibrationDelta >= ACOUSTIC_SUPPORT_LARGE_VIBRATION_DELTA_MIN) ||
+      (vibrationMean >= ACOUSTIC_SUPPORT_LARGE_VIBRATION_MEAN_MIN) ||
+      (vibrationSustain >= ACOUSTIC_SUPPORT_LARGE_VIBRATION_SUSTAIN_MIN)
+    ) &&
+    vibrationSupport;
+
+  bool vibrationLeakBand =
+    !signalFault &&
+    vibrationSupport &&
+    (vibrationMean <= ACOUSTIC_SUPPORT_LEAK_MEAN_MAX) &&
+    (vibrationSustain <= ACOUSTIC_SUPPORT_LEAK_SUSTAIN_MAX);
+
+  bool contactTransient =
+    !signalFault &&
+    (vibrationTrendFeature >= CONTACT_TRANSIENT_TREND_MAX) &&
+    (vibrationVarianceFeature <= CONTACT_TRANSIENT_VARIANCE_MAX);
+
+  bool impulsiveAcousticBurst =
+    !signalFault &&
+    (acoustic <= ACOUSTIC_IMPACT_REJECT_SOUND_MAX) &&
+    (spectralCenter >= ACOUSTIC_IMPACT_REJECT_SPECTRAL_MIN) &&
+    (zcr >= ACOUSTIC_IMPACT_REJECT_ZERO_CROSS_MIN) &&
+    (probability >= ACOUSTIC_IMPACT_REJECT_PROB_MIN);
+
+  bool acousticLeakPrimary =
+    !signalFault &&
+    !contactTransient &&
+    !impulsiveAcousticBurst &&
+    vibrationLeakBand &&
+    (acoustic >= ACOUSTIC_PRIMARY_LEAK_SOUND_MIN) &&
+    (
+      (
+        (spectralCenter >= ACOUSTIC_PRIMARY_LEAK_SPECTRAL_MIN) &&
+        (zcr >= ACOUSTIC_PRIMARY_LEAK_ZERO_CROSS_MIN) &&
+        (probability >= 0.08f)
+      ) ||
+      (
+        (probability >= ACOUSTIC_PRIMARY_LEAK_PROB_MIN) &&
+        (spectralCenter >= 2300.0f)
+      )
+    );
+
+  bool acousticLargePrimary =
+    !signalFault &&
+    !impulsiveAcousticBurst &&
+    (acoustic >= ACOUSTIC_PRIMARY_LARGE_SOUND_MIN) &&
+    (
+      (
+        (spectralCenter >= ACOUSTIC_PRIMARY_LARGE_SPECTRAL_MIN) &&
+        (zcr >= ACOUSTIC_PRIMARY_LARGE_ZERO_CROSS_MIN)
+      ) ||
+      (probability >= ACOUSTIC_PRIMARY_LARGE_PROB_MIN)
+    ) &&
+    vibrationLargeSupport;
+
+  if (lowTextureBackground) {
+    return LEAK_LEVEL_NONE;
+  }
+
+  if (acousticLargePrimary) {
+    return LEAK_LEVEL_LARGE;
+  }
+
+  if (acousticLeakPrimary) {
+    return LEAK_LEVEL_SMALL;
+  }
+
+  if (!validAudio || probability < MODEL_LEAK_THRESHOLD) {
+    return LEAK_LEVEL_NONE;
+  }
+  return LEAK_LEVEL_NONE;
+}
+
+LeakLevel applyLeakConfirmation(LeakLevel rawLevel) {
+  if (rawLevel == LEAK_LEVEL_LARGE) {
+    if (largeLeakConfirmCount < LARGE_LEAK_CONFIRM_FRAMES) {
+      largeLeakConfirmCount++;
+    }
+    largeLeakReleaseCount = 0;
+    mediumLeakConfirmCount = 0;
+    smallLeakConfirmCount = 0;
+    leakClearCount = 0;
+
+    // When an active medium leak grows into a large leak, show the upgrade
+    // immediately instead of forcing the OLED to sit on MEDIUM first.
+    if (leakLevel == LEAK_LEVEL_MEDIUM || leakLevel == LEAK_LEVEL_LARGE) {
+      return LEAK_LEVEL_LARGE;
+    }
+
+    if (largeLeakConfirmCount >= LARGE_LEAK_CONFIRM_FRAMES) {
+      return LEAK_LEVEL_LARGE;
+    }
+
+    return leakLevel;
+  }
+
+  largeLeakConfirmCount = 0;
+
+  if (leakLevel == LEAK_LEVEL_LARGE) {
+    if (largeLeakReleaseCount < LARGE_LEAK_RELEASE_FRAMES) {
+      largeLeakReleaseCount++;
+    }
+
+    if (largeLeakReleaseCount < LARGE_LEAK_RELEASE_FRAMES) {
+      return LEAK_LEVEL_LARGE;
+    }
+
+    if (rawLevel == LEAK_LEVEL_NONE) {
+      if (leakClearCount < LARGE_TO_NONE_CLEAR_FRAMES) {
+        leakClearCount++;
+      }
+      if (leakClearCount >= LARGE_TO_NONE_CLEAR_FRAMES) {
+        return LEAK_LEVEL_NONE;
+      }
+      return LEAK_LEVEL_LARGE;
+    }
+  } else {
+    largeLeakReleaseCount = 0;
+  }
+
+  if (rawLevel == LEAK_LEVEL_MEDIUM) {
+    if (mediumLeakConfirmCount < MEDIUM_LEAK_CONFIRM_FRAMES) {
+      mediumLeakConfirmCount++;
+    }
+    smallLeakConfirmCount = 0;
+    leakClearCount = 0;
+
+    if (leakLevel == LEAK_LEVEL_MEDIUM) {
+      return LEAK_LEVEL_MEDIUM;
+    }
+
+    if (mediumLeakConfirmCount >= MEDIUM_LEAK_CONFIRM_FRAMES) {
+      return LEAK_LEVEL_MEDIUM;
+    }
+
+    return leakLevel;
+  }
+
+  mediumLeakConfirmCount = 0;
+
+  if (rawLevel == LEAK_LEVEL_SMALL) {
+    if (smallLeakConfirmCount < SMALL_LEAK_CONFIRM_FRAMES) {
+      smallLeakConfirmCount++;
+    }
+    leakClearCount = 0;
+
+    if (leakLevel == LEAK_LEVEL_SMALL) {
+      return LEAK_LEVEL_SMALL;
+    }
+
+    if (smallLeakConfirmCount >= SMALL_LEAK_CONFIRM_FRAMES) {
+      return LEAK_LEVEL_SMALL;
+    }
+
+    return leakLevel;
+  }
+
+  smallLeakConfirmCount = 0;
+
+  if (leakClearCount < LEAK_CLEAR_FRAMES) {
+    leakClearCount++;
+  }
+
+  if (leakClearCount >= LEAK_CLEAR_FRAMES) {
+    return LEAK_LEVEL_NONE;
+  }
+
+  return leakLevel;
+}
+
+bool runTensorFlowModel(float features[FEATURE_COUNT], float& probability) {
+  float normalized[FEATURE_COUNT] = {0.0f};
+  normalize_features(features, normalized);
+
+  normalized[7] = 0.0f;
+  normalized[8] = 0.0f;
+
+  for (int i = 9; i < FEATURE_COUNT; i++) {
+    normalized[i] = 0.0f;
+  }
+
+  TfLiteTensor* input = interpreter->input(0);
+  for (int i = 0; i < FEATURE_COUNT; i++) {
+    input->data.f[i] = normalized[i];
+  }
+
+  if (interpreter->Invoke() != kTfLiteOk) {
+    Serial.println("Model invoke failed");
+    probability = 0.0f;
+    return false;
+  }
+
+  probability = interpreter->output(0)->data.f[0];
+  return true;
+}
+
+void updateDisplay() {
+  if (!oledReady) {
+    return;
+  }
+
+  unsigned long now = millis();
+  if (lastDisplayRefreshMs != 0 &&
+      now - lastDisplayRefreshMs < DISPLAY_REFRESH_MS) {
+    return;
+  }
+
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("Leak Detector");
+
+  display.setTextSize(2);
+  display.setCursor(0, 12);
+  if (millis() < stabilizeUntilMs) {
+    display.println("STABILIZE");
+  } else {
+    display.println(leakLevelLabel(leakLevel));
+  }
+
+  display.setTextSize(1);
+  display.setCursor(0, 34);
+  display.print("A:");
+  display.println((int)soundLevel);
+
+  display.setCursor(0, 46);
+  display.print("V:");
+  display.print(vibrationLastDelta);
+  display.print(" T:");
+  if (bmeReady && !isnan(envTemperatureC)) {
+    display.print(envTemperatureC, 1);
+    display.print("C");
+  } else {
+    display.print("--.-C");
+  }
+
+  display.setCursor(0, 56);
+  display.print("H:");
+  if (bmeReady && !isnan(envHumidityPct)) {
+    display.print(envHumidityPct, 0);
+    display.print("%");
+  } else {
+    display.print("--%");
+  }
+
+  display.display();
+  lastDisplayRefreshMs = now;
+}
+
+void printSerial() {
+  unsigned long now = millis();
+  if (lastSerialPrintMs != 0 && now - lastSerialPrintMs < SERIAL_PRINT_MS) {
+    return;
+  }
+  lastSerialPrintMs = now;
+
+  Serial.print("SoundLevel:");
+  Serial.print(soundLevel, 2);
+  Serial.print("\tSpectralCenter:");
+  Serial.print(spectralCenterHz, 2);
+  Serial.print("\tZeroCross:");
+  Serial.print(zeroCrossRate, 4);
+  Serial.print("\tLeakProb:");
+  Serial.print(modelScore, 6);
+  Serial.print("\tVibrationDelta:");
+  Serial.print(vibrationLastDelta);
+  Serial.print("\tVibrationMean:");
+  Serial.print(vibrationMeanFeature, 2);
+  Serial.print("\tVibrationVar:");
+  Serial.print(vibrationVarianceFeature, 2);
+  Serial.print("\tVibrationTrend:");
+  Serial.print(vibrationTrendFeature, 2);
+  Serial.print("\tVibrationSustain:");
+  Serial.print(vibrationSustainFeature, 2);
+  Serial.print("\tTempC:");
+  if (bmeReady && !isnan(envTemperatureC)) {
+    Serial.print(envTemperatureC, 1);
+  } else {
+    Serial.print("nan");
+  }
+  Serial.print("\tMoisture:");
+  if (bmeReady && !isnan(envHumidityPct)) {
+    Serial.print(envHumidityPct, 1);
+  } else {
+    Serial.print("nan");
+  }
+  Serial.print("\tLeakLevel:");
+  Serial.print((int)leakLevel);
+  Serial.print("\tRawLevel:");
+  Serial.println((int)rawLeakLevel);
+}
+
+void runHandheldModel() {
+  if (!readMicWindow()) {
+    Serial.println("Mic read failed");
+    leakLevel = LEAK_LEVEL_NONE;
+    updateDisplay();
+    delay(20);
+    return;
+  }
+
+  float features[FEATURE_COUNT] = {0.0f};
+
+  features[0] = computeRms(audioI16);
+  computeSpectralFeatures(
+    audioI16,
+    features[1],
+    features[2],
+    features[3],
+    features[4],
+    features[5]
+  );
+  features[6] = computeZeroCrossingRate(audioI16);
+
+  updateVibrationState();
+  updateEnvironmentState();
+
+  features[7] = 0.0f;
+  features[8] = 0.0f;
+  features[9] = vibrationLastDelta;
+  features[10] = vibrationMeanFeature;
+  features[11] = vibrationVarianceFeature;
+  features[12] = vibrationTrendFeature;
+
+  soundLevel = features[0];
+  peakFrequencyHz = features[1];
+  spectralCenterHz = features[2];
+  zeroCrossRate = features[6];
+
+  if (!runTensorFlowModel(features, modelScore)) {
+    rawLeakLevel = LEAK_LEVEL_NONE;
+  } else {
+    rawLeakLevel = classifyLeak(
+      modelScore,
+      soundLevel,
+      spectralCenterHz,
+      zeroCrossRate,
+      vibrationLastDelta,
+      vibrationMeanFeature,
+      vibrationSustainFeature
+    );
+  }
+
+  if (millis() < stabilizeUntilMs) {
+    clearLeakState();
+    updateDisplay();
+    printSerial();
+    return;
+  }
+
+  leakLevel = applyLeakConfirmation(rawLeakLevel);
+
+  updateDisplay();
+  printSerial();
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println();
+  Serial.println("BUILD: final_model_demo_handheld leak_tune_2026-05-04-r15");
+  Serial.println("CFG: mode=acoustic_primary leak_confirm=3 large_confirm=2 large_release=3 large_clear=2 clear=12 stabilize=5000 quick_reset=serial:r/reset leak_audio=18000/2500/0.17/0.18 large_audio=17000/2700/0.20/0.35 leak_vibe=550/450/500 leak_band=950/950 large_vibe=800/650/650 kick_reject=400/5000 impact_reject=24000/3600/0.40/0.995");
+
+  pinMode(GY61_X_PIN, INPUT);
+  pinMode(GY61_Y_PIN, INPUT);
+  pinMode(GY61_Z_PIN, INPUT);
+
+#if defined(ESP32)
+  analogReadResolution(12);
+  analogSetPinAttenuation(GY61_X_PIN, ADC_11db);
+  analogSetPinAttenuation(GY61_Y_PIN, ADC_11db);
+  analogSetPinAttenuation(GY61_Z_PIN, ADC_11db);
+#endif
+
+  setupI2CBuses();
+  setupDisplay();
+  setupEnvironmentSensor();
+  setupMic();
+  setupModel();
+
+  if (oledReady) {
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.setTextSize(1);
+    display.println("Keep sensor still");
+    display.println("Calibrating GY-61");
+    display.display();
+  }
+
+  calibrateVibrationBaseline();
+  updateEnvironmentState();
+  stabilizeUntilMs = millis() + STARTUP_STABILIZE_MS;
+
+  Serial.println("Ready. TensorFlow on-device. Local only.");
+}
+
+void loop() {
+  if (handleSerialCommands()) {
+    delay(5);
+    return;
+  }
+
+  runHandheldModel();
+  delay(5);
+}
