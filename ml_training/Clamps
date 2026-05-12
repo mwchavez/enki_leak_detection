@@ -1,0 +1,2213 @@
+#include <Arduino.h>
+#include <math.h>
+#include <Wire.h>
+#include <driver/i2s.h>
+#include <time.h>
+// Clamp02 / node02 build:
+// 1-inch pipe clamp, mic + GY-61 + BME680 + OLED + AWS.
+#define DEVICE_PROFILE_NAME "Clamp02-node02"
+#define PRESENTATION_NODE_LABEL "NODE 2"
+#define ENABLE_AWS_IOT 0
+#define USE_OLED_DISPLAY 1
+#define USE_BME680_ENV_SENSOR 1
+#define PRESENTATION_SERIAL_OUTPUT 1
+
+#if ENABLE_AWS_IOT
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <PubSubClient.h>
+#endif
+#if USE_OLED_DISPLAY
+#include <Adafruit_GFX.h>
+#define HAVE_ADAFRUIT_GFX 1
+#include <Adafruit_SSD1306.h>
+#define HAVE_ADAFRUIT_SSD1306 1
+#endif
+#if USE_BME680_ENV_SENSOR
+#include <Adafruit_BME680.h>
+#define HAVE_ADAFRUIT_BME680 1
+#endif
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
+#include <TensorFlowLite_ESP32.h>
+#include "tensorflow/lite/micro/all_ops_resolver.h"
+#include "tensorflow/lite/micro/micro_error_reporter.h"
+#include "tensorflow/lite/micro/micro_interpreter.h"
+#include "tensorflow/lite/schema/schema_generated.h"
+#include "leak_model_data.h"
+#include "scaler_params.h"
+#if ENABLE_AWS_IOT
+#include "super_secret2.h"
+#endif
+// Demo wiring:
+// INMP441 VDD -> 3.3V
+// INMP441 GND -> GND
+// INMP441 L/R -> 3.3V
+// INMP441 WS  -> GPIO 25
+// INMP441 SCK -> GPIO 26
+// INMP441 SD  -> GPIO 33
+//
+// External LED:
+// GPIO 4 -> resistor -> LED -> GND
+//
+// Optional leak-level LEDs:
+// GPIO 16 -> resistor -> medium leak LED -> GND
+// GPIO 17 -> resistor -> large leak LED -> GND
+//
+// Optional RGB LED:
+// Common cathode: common leg -> GND
+// GPIO 4  -> resistor -> R leg
+// GPIO 16 -> resistor -> G leg
+// GPIO 17 -> resistor -> B leg
+// If your RGB LED is common-anode instead, set RGB_LED_COMMON_ANODE to 1.
+//
+// GY-61 accelerometer (ADXL335):
+// VCC -> 3.3V
+// GND -> GND
+// X   -> GPIO 34
+// Y   -> GPIO 35
+// Z   -> GPIO 32
+// Change the GY61_*_PIN values below if your wiring is different.
+#define SMALL_LED_PIN 4
+#define MEDIUM_LED_PIN 16
+#define LARGE_LED_PIN 17
+#define LED_ACTIVE_STATE HIGH
+#define USE_LEAK_LEVEL_LEDS 0
+#define USE_RGB_LEAK_LED 1
+#define RGB_LED_COMMON_ANODE 0
+#define RGB_SHOW_SIGNAL_FAULT 1
+#define RGB_RED_PIN 4
+#define RGB_GREEN_PIN 16
+#define RGB_BLUE_PIN 17
+#if USE_LEAK_LEVEL_LEDS && USE_RGB_LEAK_LED
+#error "Enable either USE_LEAK_LEVEL_LEDS or USE_RGB_LEAK_LED, not both."
+#endif
+#define TENSOR_ARENA_SIZE (40 * 1024)
+#define I2S_WS_PIN 25
+#define I2S_SCK_PIN 26
+#define I2S_SD_PIN 33
+#define I2S_PORT I2S_NUM_0
+#define SAMPLE_RATE 16000
+#define WINDOW_SAMPLES 128
+#define OLED_I2C_SDA_PIN 21
+#define OLED_I2C_SCL_PIN 22
+#define BME_I2C_SDA_PIN 18
+#define BME_I2C_SCL_PIN 19
+#define OLED_SCREEN_WIDTH 128
+#define OLED_SCREEN_HEIGHT 64
+#define OLED_RESET_PIN -1
+#define OLED_I2C_ADDRESS_PRIMARY 0x3C
+#define OLED_I2C_ADDRESS_SECONDARY 0x3D
+#define BME680_I2C_ADDRESS_PRIMARY 0x77
+#define BME680_I2C_ADDRESS_SECONDARY 0x76
+#define ENV_SAMPLE_INTERVAL_MS 1000
+#define DISPLAY_REFRESH_MS 250
+#define DISPLAY_BOOT_SPLASH_MS 3000
+// Vibration assist is back online and acts as a secondary confirmation path.
+#define USE_VIBRATION_ASSIST 1
+#define VIBRATION_PIN 32 // legacy single-pin sensor input when VIBRATION_SENSOR_IS_PIEZO = 1
+#define VIBRATION_ACTIVE_STATE LOW // legacy switch-sensor active state
+#define VIBRATION_HOLD_MS 150 // threshold: keep vibration assist active for 150 ms after a hit
+#define VIBRATION_SENSOR_IS_PIEZO 0
+#define GY61_X_PIN 34
+#define GY61_Y_PIN 35
+#define GY61_Z_PIN 32
+#define GY61_SAMPLE_BURST 8 // threshold tuning: accelerometer reads per loop
+#define GY61_CALIBRATION_SAMPLES 64 // threshold tuning: initial still baseline capture
+#define GY61_BASELINE_ALPHA 0.02f // threshold tuning: baseline update speed
+#define GY61_BASELINE_UPDATE_LIMIT 18.0f // threshold: only calm motion updates the baseline
+#define GY61_DELTA_SCALE 3.0f // threshold tuning: maps accel motion into leak-rule vibration units
+#define GY61_HIT_THRESHOLD 90 // threshold: motion spike needed to count as a hit
+#define PIEZO_HIT_THRESHOLD 220 // threshold: obvious impact spike needed to count as a hit
+#define PIEZO_BASELINE_ALPHA 0.02f // threshold tuning: baseline update speed
+#define PIEZO_BASELINE_UPDATE_LIMIT 80 // threshold: only modest deltas can update the baseline
+#define PIEZO_SAMPLE_BURST 8 // threshold tuning: piezo reads per loop
+#define PIEZO_CALIBRATION_SAMPLES 64 // threshold tuning: initial still baseline capture
+#define VIBRATION_SPIKE_HOLD_MS 250 // threshold: keep impact spike visible briefly
+#define VIBRATION_FEATURE_ACTIVITY_DELTA 40 // threshold: minimum delta counted as active vibration
+#define VIBRATION_SUSTAIN_ALPHA 0.25f // threshold tuning: smoothing for sustained vibration
+// Demo-tuned thresholds:
+// Strong leak path uses the model with a normal sound gate.
+// Assisted path allows a faster trigger when the vibration sensor also reacts.
+#define STRONG_LEAK_THRESHOLD 0.80f // threshold: model score for strong audio-only detection
+#define ASSIST_LEAK_THRESHOLD 0.70f // threshold: lower model score allowed with vibration help
+#define MIN_SOUND_LEVEL 9000.0f // threshold: minimum sound energy to consider a leak
+#define MIN_ZERO_CROSS_RATE 0.08f // threshold: minimum signal texture/noisiness
+#define ASSIST_SPECTRAL_CENTER 2200.0f // threshold: spectral center needed for assisted detection
+#define ASSIST_ZERO_CROSS_RATE 0.14f // threshold: zero-cross rate needed for assisted detection
+#define REQUIRED_CONSECUTIVE_STRONG 2 // threshold: strong detections needed in a row
+#define REQUIRED_CONSECUTIVE_WITH_VIBRATION 2 // threshold: require confirmation even with vibration assist
+#define MAX_VALID_SOUND_LEVEL 32500.0f // threshold: above this the signal is treated as faulty/clipped
+#define MAX_CLIPPED_SAMPLES 110 // threshold: too many clipped samples means unreliable audio
+#define DISPLAY_LEAK_HOLD_MS 3000 // threshold: keep leak output on for 3 seconds
+#define ALARM_LATCH_MIN_MS 10000 // threshold: once a leak alarm starts, keep it latched for at least 10 seconds
+#define ALARM_CLEAR_QUIET_MS 5000 // threshold: require 5 seconds of quiet before clearing a latched alarm
+#define DISPLAY_SUSTAIN_SOUND_LEVEL 11500.0f // threshold: minimum sound to keep display alive
+#define DISPLAY_SUSTAIN_SPECTRAL_CENTER 2100.0f // threshold: minimum spectral center for display sustain
+#define DISPLAY_SUSTAIN_ZERO_CROSS_RATE 0.12f // threshold: minimum zero-cross rate for display sustain
+#define DISPLAY_SUSTAIN_MODEL_THRESHOLD 0.72f // threshold: model score needed to keep display alive
+#define DEMO_SOUND_LEVEL 9500.0f // threshold: demo acoustic gate minimum sound
+#define DEMO_SPECTRAL_CENTER 1900.0f // threshold: demo acoustic gate minimum spectral center
+#define DEMO_ZERO_CROSS_RATE 0.10f // threshold: demo acoustic gate minimum zero-cross rate
+#define DEMO_MODEL_THRESHOLD 0.88f // threshold: demo burst model score
+#define DEMO_CONFIRM_COUNT 3 // threshold: demo burst confirmations needed
+#define LARGE_BURST_CONFIRM_COUNT 2 // threshold: large-burst frames needed before blue can latch
+// Small leak showed up as a narrow, high-frequency whistle in your logs.
+#define SMALL_LEAK_WHISTLE_SOUND_LEVEL 17000.0f // threshold: small whistle minimum sound
+#define SMALL_LEAK_WHISTLE_SPECTRAL_CENTER 3200.0f // threshold: small whistle minimum spectral center
+#define SMALL_LEAK_WHISTLE_ZERO_CROSS_RATE 0.30f // threshold: small whistle minimum zero-cross rate
+#define SMALL_LEAK_WHISTLE_MODEL_THRESHOLD 0.995f // threshold: small whistle minimum model score
+// Large leak should be reserved for the clearly strongest events.
+#define LARGE_LEAK_SOUND_LEVEL 25000.0f // threshold: large leak minimum sound
+#define LARGE_LEAK_ASSIST_SOUND_LEVEL 24000.0f // threshold: assisted large leak minimum sound
+#define LARGE_LEAK_VIBRATION_DELTA 300 // threshold: vibration delta needed to help confirm large leak
+// Clamp normal-flow baseline from the 1-inch pipe no-leak waterflow tests.
+// These values suppress the steady blue false-positive band from normal flow.
+#define CLAMP_FLOW_BASELINE_SOUND_MIN 24000.0f // threshold: normal-flow sound lower edge
+#define CLAMP_FLOW_BASELINE_SOUND_MAX 31200.0f // threshold: normal-flow sound upper edge
+#define CLAMP_FLOW_BASELINE_SPECTRAL_MIN 3100.0f // threshold: normal-flow spectral lower edge
+#define CLAMP_FLOW_BASELINE_SPECTRAL_MAX 4350.0f // threshold: normal-flow spectral upper edge
+#define CLAMP_FLOW_BASELINE_ZERO_CROSS_MIN 0.28f // threshold: normal-flow texture lower edge
+#define CLAMP_FLOW_BASELINE_ZERO_CROSS_MAX 0.65f // threshold: normal-flow texture upper edge
+#define CLAMP_FLOW_BASELINE_MODEL_MIN 0.98f // threshold: model score seen during normal flow
+#define CLAMP_FLOW_BASELINE_VIBRATION_SUSTAIN_MIN 45.0f // threshold: steady pipe vibration floor
+#define CLAMP_FLOW_BASELINE_VIBRATION_DELTA_MAX 2200 // threshold: debug reference only; flow gate is acoustic-led
+#define CLAMP_FLOW_BASELINE_VIBRATION_MEAN_MAX 800.0f // threshold: debug reference only; flow gate is acoustic-led
+#define CLAMP_FLOW_BASELINE_VIBRATION_SUSTAIN_MAX 500.0f // threshold: debug reference only; flow gate is acoustic-led
+#define CLAMP_FLOW_BASELINE_ESCAPE_SOUND 32000.0f // threshold: let very loud events bypass flow suppression
+#define CLAMP_FLOW_BASELINE_ESCAPE_VIBRATION_DELTA 2600 // threshold: debug reference only; flow gate is acoustic-led
+#define CLAMP_FLOW_NEAR_SOUND_MIN 23500.0f // threshold: near-flow lower edge for suppressing one-frame blue slips
+#define CLAMP_FLOW_NEAR_ZERO_CROSS_MIN 0.20f // threshold: near-flow texture floor below the strict baseline
+// Large flow leaks still look like pipe flow acoustically, but show stronger vibration bursts.
+#define LARGE_LEAK_FLOW_VIBRATION_SUSTAIN 370.0f // threshold: sustained vibration floor for large-in-flow
+#define LARGE_LEAK_FLOW_VIBRATION_MEAN 430.0f // threshold: mean vibration floor for large-in-flow
+#define LARGE_LEAK_FLOW_VIBRATION_TREND 180.0f // threshold: rising vibration trend for large-in-flow
+#define LARGE_LEAK_FLOW_FAST_RISE_SUSTAIN 310.0f // threshold: early fast-rising large flow burst sustain
+#define LARGE_LEAK_FLOW_FAST_RISE_MEAN 420.0f // threshold: early fast-rising large flow burst mean
+#define LARGE_LEAK_FLOW_FAST_RISE_TREND 150.0f // threshold: early fast-rising large flow burst trend
+#define LARGE_LEAK_FLOW_FAST_RISE_DELTA 700 // threshold: early fast-rising large flow burst delta
+#define LARGE_LEAK_FLOW_HIGH_TEXTURE_SPECTRAL 3850.0f // threshold: high-texture heavy burst path
+#define LARGE_LEAK_FLOW_HIGH_TEXTURE_ZERO_CROSS 0.47f // threshold: high-texture heavy burst path
+#define LARGE_LEAK_FLOW_HIGH_TEXTURE_SUSTAIN 390.0f // threshold: high-texture heavy burst path
+#define LARGE_LEAK_FLOW_HIGH_TEXTURE_DELTA 1000 // threshold: high-texture heavy burst path
+#define LARGE_LEAK_FLOW_LOW_ZERO_CROSS_MAX 0.26f // threshold: jet-like low texture path for large-in-flow
+#define LARGE_LEAK_FLOW_LOW_ZERO_DELTA 800 // threshold: vibration delta needed on low-texture large path
+// Small flow leaks look acoustically like normal flow, but carry more sustained clamp vibration.
+#define SMALL_LEAK_FLOW_ZERO_CROSS_MIN 0.26f // threshold: allow slight low-ZCR dip seen in small flow leak
+#define SMALL_LEAK_FLOW_VIBRATION_SUSTAIN 370.0f // threshold: sustained vibration that breaks out as small leak
+#define SMALL_LEAK_FLOW_MODEL_MIN 0.98f // threshold: model score required for small leak inside flow
+#if ENABLE_AWS_IOT
+#define AWS_PUBLISH_INTERVAL_MS 1000
+#endif
+#define COMPACT_SERIAL_OUTPUT 1 // 1 = focused feature output, 0 = full debug output
+// TensorFlow Lite Micro objects used to run the embedded model.
+static tflite::MicroErrorReporter micro_error_reporter;
+static tflite::AllOpsResolver resolver;
+static uint8_t tensor_arena[TENSOR_ARENA_SIZE];
+static tflite::MicroInterpreter* interpreter = nullptr;
+#if USE_BME680_ENV_SENSOR
+TwoWire bmeWire = TwoWire(1);
+#endif
+#if USE_OLED_DISPLAY
+Adafruit_SSD1306 display(
+  OLED_SCREEN_WIDTH,
+  OLED_SCREEN_HEIGHT,
+  &Wire,
+  OLED_RESET_PIN
+);
+#endif
+#if USE_BME680_ENV_SENSOR
+Adafruit_BME680 bme680(&bmeWire);
+#endif
+#if ENABLE_AWS_IOT
+const char* ssid = "LINKSYS24";
+const char* password = "microembed2026";
+const char* AWS_ENDPOINT = "a2bcnmiilel0x0-ats.iot.us-east-2.amazonaws.com";
+// DEVICE_ID should match the AWS IoT thing/topic this clamp publishes to.
+const char* DEVICE_ID = "node02";
+WiFiClientSecure net;
+PubSubClient client(net);
+String awsTopic = String("leaksensor/") + DEVICE_ID + "/data";
+#endif
+// Audio capture buffers.
+static int32_t raw_samples[WINDOW_SAMPLES];
+static int16_t audio_i16[WINDOW_SAMPLES];
+// Runtime state carried between loop iterations.
+unsigned long lastPrintMs = 0;
+unsigned long presentationClockStartMs = 0;
+#if PRESENTATION_SERIAL_OUTPUT
+const unsigned long PRINT_INTERVAL_MS = 1000;
+#else
+const unsigned long PRINT_INTERVAL_MS = 150;
+#endif
+int consecutiveLeakCount = 0;
+unsigned long vibrationHoldUntilMs = 0;
+bool lastVibrationState = HIGH;
+unsigned long vibrationEdgeCount = 0;
+int vibrationBaseline = 0;
+bool vibrationBaselineReady = false;
+int vibrationLastRaw = 0;
+int vibrationLastDelta = 0;
+int vibrationPeakDelta = 0;
+int vibrationHeldDelta = 0;
+unsigned long vibrationSpikeHoldUntilMs = 0;
+float vibrationMagnitudeFeature = 0.0f;
+float vibrationMeanFeature = 0.0f;
+float vibrationVarianceFeature = 0.0f;
+float vibrationTrendFeature = 0.0f;
+float vibrationSustainFeature = 0.0f;
+float previousVibrationMeanFeature = 0.0f;
+#if USE_VIBRATION_ASSIST && !VIBRATION_SENSOR_IS_PIEZO
+const int gy61Pins[3] = {GY61_X_PIN, GY61_Y_PIN, GY61_Z_PIN};
+int gy61Baseline[3] = {0, 0, 0};
+int gy61LastRaw[3] = {0, 0, 0};
+#endif
+int clippedSampleCount = 0;
+unsigned long displayLeakHoldUntilMs = 0;
+unsigned long alarmLeakHoldUntilMs = 0;
+unsigned long alarmQuietSinceMs = 0;
+int demoLeakCount = 0;
+int largeLeakBurstCount = 0;
+#if ENABLE_AWS_IOT
+unsigned long lastAwsPublishMs = 0;
+#endif
+bool oledDisplayReady = false;
+uint8_t oledI2CAddressInUse = OLED_I2C_ADDRESS_PRIMARY;
+bool envSensorReady = false;
+unsigned long lastEnvSampleMs = 0;
+unsigned long lastDisplayRefreshMs = 0;
+float envTemperatureC = NAN;
+float envHumidityPct = NAN;
+float envPressureHpa = NAN;
+float envGasKOhms = NAN;
+// Leak sizes used by the classifier and LED output.
+enum LeakLevel {
+  LEAK_LEVEL_NONE = 0,
+  LEAK_LEVEL_SMALL = 1,
+  LEAK_LEVEL_MEDIUM = 2,
+  LEAK_LEVEL_LARGE = 3
+};
+LeakLevel eventPeakLeakLevel = LEAK_LEVEL_NONE;
+LeakLevel displayedLeakLevel = LEAK_LEVEL_NONE;
+LeakLevel alarmedLeakLevel = LEAK_LEVEL_NONE;
+const char* leakLevelLabel(LeakLevel leakLevel) {
+  switch (leakLevel) {
+    case LEAK_LEVEL_SMALL:
+      return "LEAK";
+    case LEAK_LEVEL_MEDIUM:
+      return "LEAK";
+    case LEAK_LEVEL_LARGE:
+      return "LARGE";
+    default:
+      return "NO LEAK";
+  }
+}
+
+void printElapsedPrefix(unsigned long nowMs) {
+  unsigned long elapsedMs = nowMs - presentationClockStartMs;
+  unsigned long totalSeconds = elapsedMs / 1000UL;
+  unsigned long minutes = totalSeconds / 60UL;
+  unsigned long seconds = totalSeconds % 60UL;
+  Serial.print("T+");
+  if (minutes < 10UL) {
+    Serial.print("0");
+  }
+  Serial.print(minutes);
+  Serial.print(":");
+  if (seconds < 10UL) {
+    Serial.print("0");
+  }
+  Serial.print(seconds);
+  Serial.print(" | ");
+}
+
+void resetPresentationClock() {
+  presentationClockStartMs = millis();
+  lastPrintMs = 0;
+  Serial.println("TIMER: reset to T+00:00");
+}
+
+bool handleSerialCommands() {
+  if (!Serial.available()) {
+    return false;
+  }
+
+  String command = Serial.readStringUntil('\n');
+  command.trim();
+  command.toLowerCase();
+
+  if (command == "t" || command == "time" || command == "timer") {
+    resetPresentationClock();
+    return true;
+  }
+
+  return false;
+}
+const char* leakOutputLabel(LeakLevel leakLevel) {
+#if USE_RGB_LEAK_LED
+  switch (leakLevel) {
+    case LEAK_LEVEL_NONE:
+      return "GREEN";
+    case LEAK_LEVEL_SMALL:
+      return "RED";
+    case LEAK_LEVEL_MEDIUM:
+      return "YELLOW";
+    case LEAK_LEVEL_LARGE:
+      return "BLUE";
+    default:
+      return "GREEN";
+  }
+#elif USE_LEAK_LEVEL_LEDS
+  switch (leakLevel) {
+    case LEAK_LEVEL_SMALL:
+      return "SMALL";
+    case LEAK_LEVEL_MEDIUM:
+      return "MEDIUM";
+    case LEAK_LEVEL_LARGE:
+      return "LARGE";
+    default:
+      return "OFF";
+  }
+#else
+  return leakLevel == LEAK_LEVEL_NONE ? "OFF" : "ON";
+#endif
+}
+void writeLedPin(int pin, bool enabled) {
+  digitalWrite(pin, enabled ? LED_ACTIVE_STATE : !LED_ACTIVE_STATE);
+}
+void writeRgbPin(int pin, bool enabled) {
+#if RGB_LED_COMMON_ANODE
+  digitalWrite(pin, enabled ? LOW : HIGH);
+#else
+  digitalWrite(pin, enabled ? HIGH : LOW);
+#endif
+}
+// Convert raw vibration bursts into steadier rule-friendly features.
+void updateEngineeredVibrationFeatures(
+  float magnitude,
+  float activeMean,
+  float variance,
+  float burstMean
+) {
+  vibrationMagnitudeFeature = magnitude;
+  vibrationMeanFeature = activeMean;
+  vibrationVarianceFeature = variance;
+  float risingTrend = activeMean - previousVibrationMeanFeature;
+  vibrationTrendFeature = risingTrend > 0.0f ? risingTrend : 0.0f;
+  vibrationSustainFeature =
+    ((1.0f - VIBRATION_SUSTAIN_ALPHA) * vibrationSustainFeature) +
+    (VIBRATION_SUSTAIN_ALPHA * burstMean);
+  previousVibrationMeanFeature = activeMean;
+}
+bool vibrationSupportsMedium(
+  int vibrationDelta,
+  float vibrationMean,
+  float vibrationVariance,
+  float vibrationTrend,
+  float vibrationSustain
+) {
+  return
+    (vibrationMean >= 40.0f) ||
+    (vibrationSustain >= 36.0f) ||
+    ((vibrationVariance >= 1000.0f) && (vibrationMean >= 30.0f)) ||
+    ((vibrationTrend >= 10.0f) && (vibrationDelta >= 120));
+}
+bool vibrationSupportsLarge(
+  int vibrationDelta,
+  float vibrationMean,
+  float vibrationVariance,
+  float vibrationTrend,
+  float vibrationSustain
+) {
+  return
+    (vibrationMean >= 70.0f) ||
+    (vibrationSustain >= 55.0f) ||
+    ((vibrationVariance >= 2500.0f) && (vibrationMean >= 45.0f)) ||
+    ((vibrationTrend >= 16.0f) && (vibrationDelta >= 170));
+}
+bool isClampNormalFlowBaseline(
+  float soundLevel,
+  float spectralCenter,
+  float zeroCrossRate,
+  float probability,
+  int vibrationDelta,
+  float vibrationMean,
+  float vibrationSustain
+) {
+  (void)vibrationDelta;
+  (void)vibrationMean;
+  (void)vibrationSustain;
+
+  bool acousticMatchesNormalFlow =
+    (soundLevel >= CLAMP_FLOW_BASELINE_SOUND_MIN) &&
+    (soundLevel <= CLAMP_FLOW_BASELINE_SOUND_MAX) &&
+    (spectralCenter >= CLAMP_FLOW_BASELINE_SPECTRAL_MIN) &&
+    (spectralCenter <= CLAMP_FLOW_BASELINE_SPECTRAL_MAX) &&
+    (zeroCrossRate >= CLAMP_FLOW_BASELINE_ZERO_CROSS_MIN) &&
+    (zeroCrossRate <= CLAMP_FLOW_BASELINE_ZERO_CROSS_MAX) &&
+    (probability >= CLAMP_FLOW_BASELINE_MODEL_MIN);
+  return
+    acousticMatchesNormalFlow &&
+    (soundLevel < CLAMP_FLOW_BASELINE_ESCAPE_SOUND);
+}
+bool isClampNearNormalFlowBaseline(
+  float soundLevel,
+  float spectralCenter,
+  float zeroCrossRate,
+  float probability,
+  float vibrationSustain
+) {
+  bool acousticNearNormalFlow =
+    (soundLevel >= CLAMP_FLOW_NEAR_SOUND_MIN) &&
+    (soundLevel <= CLAMP_FLOW_BASELINE_SOUND_MAX) &&
+    (spectralCenter >= CLAMP_FLOW_BASELINE_SPECTRAL_MIN) &&
+    (spectralCenter <= CLAMP_FLOW_BASELINE_SPECTRAL_MAX) &&
+    (zeroCrossRate >= CLAMP_FLOW_NEAR_ZERO_CROSS_MIN) &&
+    (zeroCrossRate <= CLAMP_FLOW_BASELINE_ZERO_CROSS_MAX) &&
+    (probability >= CLAMP_FLOW_BASELINE_MODEL_MIN) &&
+    (soundLevel < CLAMP_FLOW_BASELINE_ESCAPE_SOUND);
+
+  return
+    acousticNearNormalFlow &&
+    (vibrationSustain < SMALL_LEAK_FLOW_VIBRATION_SUSTAIN);
+}
+bool isClampLargeLeakInFlow(
+  float soundLevel,
+  float spectralCenter,
+  float zeroCrossRate,
+  float probability,
+  int vibrationDelta,
+  float vibrationMean,
+  float vibrationTrend,
+  float vibrationSustain
+) {
+  bool acousticInFlowBand =
+    (soundLevel >= CLAMP_FLOW_BASELINE_SOUND_MIN) &&
+    (soundLevel <= CLAMP_FLOW_BASELINE_SOUND_MAX) &&
+    (spectralCenter >= CLAMP_FLOW_BASELINE_SPECTRAL_MIN) &&
+    (spectralCenter <= CLAMP_FLOW_BASELINE_SPECTRAL_MAX) &&
+    (zeroCrossRate >= CLAMP_FLOW_NEAR_ZERO_CROSS_MIN) &&
+    (zeroCrossRate <= CLAMP_FLOW_BASELINE_ZERO_CROSS_MAX) &&
+    (probability >= CLAMP_FLOW_BASELINE_MODEL_MIN) &&
+    (soundLevel < CLAMP_FLOW_BASELINE_ESCAPE_SOUND);
+  bool strongRisingVibration =
+    (vibrationSustain >= LARGE_LEAK_FLOW_VIBRATION_SUSTAIN) &&
+    (vibrationMean >= LARGE_LEAK_FLOW_VIBRATION_MEAN) &&
+    (vibrationTrend >= LARGE_LEAK_FLOW_VIBRATION_TREND);
+  bool fastRisingVibration =
+    (vibrationSustain >= LARGE_LEAK_FLOW_FAST_RISE_SUSTAIN) &&
+    (vibrationMean >= LARGE_LEAK_FLOW_FAST_RISE_MEAN) &&
+    (vibrationTrend >= LARGE_LEAK_FLOW_FAST_RISE_TREND) &&
+    (vibrationDelta >= LARGE_LEAK_FLOW_FAST_RISE_DELTA);
+  bool highTextureHeavyVibration =
+    (spectralCenter >= LARGE_LEAK_FLOW_HIGH_TEXTURE_SPECTRAL) &&
+    (zeroCrossRate >= LARGE_LEAK_FLOW_HIGH_TEXTURE_ZERO_CROSS) &&
+    (vibrationSustain >= LARGE_LEAK_FLOW_HIGH_TEXTURE_SUSTAIN) &&
+    (vibrationMean >= LARGE_LEAK_FLOW_VIBRATION_MEAN) &&
+    (vibrationDelta >= LARGE_LEAK_FLOW_HIGH_TEXTURE_DELTA);
+  bool lowTextureJetVibration =
+    (zeroCrossRate <= LARGE_LEAK_FLOW_LOW_ZERO_CROSS_MAX) &&
+    (vibrationSustain >= LARGE_LEAK_FLOW_VIBRATION_SUSTAIN) &&
+    (vibrationMean >= LARGE_LEAK_FLOW_VIBRATION_MEAN) &&
+    (vibrationDelta >= LARGE_LEAK_FLOW_LOW_ZERO_DELTA);
+
+  return
+    acousticInFlowBand &&
+    (strongRisingVibration || fastRisingVibration || highTextureHeavyVibration || lowTextureJetVibration);
+}
+bool isClampSmallLeakInFlow(
+  float soundLevel,
+  float spectralCenter,
+  float zeroCrossRate,
+  float probability,
+  float vibrationSustain
+) {
+  bool acousticInFlowBand =
+    (soundLevel >= CLAMP_FLOW_BASELINE_SOUND_MIN) &&
+    (soundLevel <= CLAMP_FLOW_BASELINE_SOUND_MAX) &&
+    (spectralCenter >= CLAMP_FLOW_BASELINE_SPECTRAL_MIN) &&
+    (spectralCenter <= CLAMP_FLOW_BASELINE_SPECTRAL_MAX) &&
+    (zeroCrossRate >= SMALL_LEAK_FLOW_ZERO_CROSS_MIN) &&
+    (zeroCrossRate <= CLAMP_FLOW_BASELINE_ZERO_CROSS_MAX) &&
+    (probability >= SMALL_LEAK_FLOW_MODEL_MIN) &&
+    (soundLevel < CLAMP_FLOW_BASELINE_ESCAPE_SOUND);
+
+  return
+    acousticInFlowBand &&
+    (vibrationSustain >= SMALL_LEAK_FLOW_VIBRATION_SUSTAIN);
+}
+// Size is decided by rules layered on top of the model score.
+LeakLevel classifyLeakLevel(
+  float soundLevel,
+  float spectralCenter,
+  float zeroCrossRate,
+  float probability,
+  int vibrationDelta,
+  float vibrationMean,
+  float vibrationVariance,
+  float vibrationTrend,
+  float vibrationSustain
+);
+#if ENABLE_AWS_IOT
+void connectAWS();
+void publishLeakTelemetry(
+  float soundLevel,
+  float peakFrequency,
+  float spectralCenter,
+  float zeroCrossRate,
+  float probability,
+  int vibrationDelta,
+  float vibrationMean,
+  float vibrationVariance,
+  float vibrationTrend,
+  float vibrationSustain,
+  LeakLevel displayedLevel,
+  bool ledOn
+);
+#endif
+void setupI2CBus();
+void setupDisplay();
+void setupEnvironmentSensor();
+void updateEnvironmentState();
+void showDisplayBootSplash();
+void updateLocalDisplay(
+  LeakLevel displayedLevel,
+  float probability,
+  float soundLevel,
+  int vibrationDelta
+);
+void calibrateVibrationBaseline();
+void updateLeakEventPeaks(
+  float soundLevel,
+  float spectralCenter,
+  float zeroCrossRate,
+  float probability,
+  int vibrationDelta,
+  float vibrationMean,
+  float vibrationVariance,
+  float vibrationTrend,
+  float vibrationSustain
+) {
+  LeakLevel frameLeakLevel = classifyLeakLevel(
+    soundLevel,
+    spectralCenter,
+    zeroCrossRate,
+    probability,
+    vibrationDelta,
+    vibrationMean,
+    vibrationVariance,
+    vibrationTrend,
+    vibrationSustain
+  );
+  if (frameLeakLevel > eventPeakLeakLevel) {
+    eventPeakLeakLevel = frameLeakLevel;
+  }
+}
+void resetLeakEventPeaks() {
+  eventPeakLeakLevel = LEAK_LEVEL_NONE;
+}
+const char* leakLevelColorName(LeakLevel leakLevel) {
+  switch (leakLevel) {
+    case LEAK_LEVEL_NONE:
+      return "green";
+    case LEAK_LEVEL_SMALL:
+      return "red";
+    case LEAK_LEVEL_MEDIUM:
+      return "yellow";
+    case LEAK_LEVEL_LARGE:
+      return "blue";
+    default:
+      return "off";
+  }
+}
+LeakLevel classifyLeakLevel(
+  float soundLevel,
+  float spectralCenter,
+  float zeroCrossRate,
+  float probability,
+  int vibrationDelta,
+  float vibrationMean,
+  float vibrationVariance,
+  float vibrationTrend,
+  float vibrationSustain
+) {
+  bool vibrationMediumSupport = vibrationSupportsMedium(
+    vibrationDelta,
+    vibrationMean,
+    vibrationVariance,
+    vibrationTrend,
+    vibrationSustain
+  );
+  bool vibrationLargeSupport = vibrationSupportsLarge(
+    vibrationDelta,
+    vibrationMean,
+    vibrationVariance,
+    vibrationTrend,
+    vibrationSustain
+  );
+  if (isClampLargeLeakInFlow(
+    soundLevel,
+    spectralCenter,
+    zeroCrossRate,
+    probability,
+    vibrationDelta,
+    vibrationMean,
+    vibrationTrend,
+    vibrationSustain
+  )) {
+    return LEAK_LEVEL_LARGE;
+  }
+  if (isClampSmallLeakInFlow(
+    soundLevel,
+    spectralCenter,
+    zeroCrossRate,
+    probability,
+    vibrationSustain
+  )) {
+    return LEAK_LEVEL_SMALL;
+  }
+  if (isClampNormalFlowBaseline(
+    soundLevel,
+    spectralCenter,
+    zeroCrossRate,
+    probability,
+    vibrationDelta,
+    vibrationMean,
+    vibrationSustain
+  )) {
+    return LEAK_LEVEL_NONE;
+  }
+  if (isClampNearNormalFlowBaseline(
+    soundLevel,
+    spectralCenter,
+    zeroCrossRate,
+    probability,
+    vibrationSustain
+  )) {
+    return LEAK_LEVEL_NONE;
+  }
+  // threshold: early large pattern at 16k/2800/0.19/0.80 or 19k/2550/0.20/0.60
+  bool largeTransitionPattern =
+    (
+      (soundLevel >= 16000.0f) &&
+      (spectralCenter >= 2800.0f) &&
+      (zeroCrossRate >= 0.19f) &&
+      (probability >= 0.80f)
+    ) ||
+    (
+      (soundLevel >= 19000.0f) &&
+      (spectralCenter >= 2550.0f) &&
+      (zeroCrossRate >= 0.20f) &&
+      (probability >= 0.60f)
+    );
+  // Order matters here: strong special cases are checked before the medium band.
+  // Small leak: narrow whistle pattern seen in the bench logs.
+  if (
+    (soundLevel >= SMALL_LEAK_WHISTLE_SOUND_LEVEL) &&
+    (soundLevel < 22000.0f) &&
+    (spectralCenter >= SMALL_LEAK_WHISTLE_SPECTRAL_CENTER) &&
+    (zeroCrossRate >= 0.28f) &&
+    (probability >= SMALL_LEAK_WHISTLE_MODEL_THRESHOLD) &&
+    (vibrationDelta < 180)
+  ) {
+    return LEAK_LEVEL_SMALL;
+  }
+  // Small leak: reserve red for clear whistle-like signatures, not broad airflow noise.
+  if (
+    (soundLevel >= 14500.0f) &&
+    (soundLevel < 22000.0f) &&
+    (spectralCenter >= 2800.0f) &&
+    (zeroCrossRate >= 0.24f) &&
+    (probability >= 0.97f) &&
+    (vibrationDelta < 180) &&
+    !vibrationLargeSupport
+  ) {
+    return LEAK_LEVEL_SMALL;
+  }
+  // Large leak: reserve blue for the strongest events instead of letting
+  // vibration alone promote medium leaks to large.
+  if (
+    (
+      (soundLevel >= LARGE_LEAK_SOUND_LEVEL) &&
+      (probability >= 0.95f) &&
+      (zeroCrossRate >= 0.14f) &&
+      (spectralCenter >= 2200.0f)
+    ) ||
+    (
+      (soundLevel >= LARGE_LEAK_ASSIST_SOUND_LEVEL) &&
+      (vibrationDelta >= LARGE_LEAK_VIBRATION_DELTA) &&
+      (spectralCenter >= 2200.0f) &&
+      (zeroCrossRate >= 0.12f) &&
+      (probability >= 0.75f)
+    ) ||
+    (
+      (soundLevel >= 22000.0f) &&
+      (spectralCenter >= 2900.0f) &&
+      (probability >= 0.98f)
+    ) ||
+    (
+      (soundLevel >= 15000.0f) &&
+      (spectralCenter >= 2500.0f) &&
+      (zeroCrossRate >= 0.19f) &&
+      (probability >= 0.75f) &&
+      vibrationLargeSupport
+    ) ||
+    largeTransitionPattern
+  ) {
+    return LEAK_LEVEL_LARGE;
+  }
+  // Medium leak: confirmed leaks with solid energy in the normal working band.
+  if (
+    (
+      (soundLevel >= 15000.0f) &&
+      (spectralCenter >= 2400.0f) &&
+      (zeroCrossRate >= 0.16f) &&
+      (probability >= 0.88f)
+    ) ||
+    (
+      (soundLevel >= 12500.0f) &&
+      (spectralCenter >= 2300.0f) &&
+      (zeroCrossRate >= 0.16f) &&
+      (probability >= 0.82f) &&
+      vibrationMediumSupport
+    ) ||
+    (
+      (soundLevel >= 13500.0f) &&
+      (spectralCenter >= 2150.0f) &&
+      (zeroCrossRate >= 0.16f) &&
+      (probability >= 0.70f) &&
+      (vibrationDelta >= 180) &&
+      !largeTransitionPattern
+    )
+  ) {
+    return LEAK_LEVEL_MEDIUM;
+  }
+  return LEAK_LEVEL_NONE;
+}
+void setLeakOutputs(LeakLevel leakLevel, bool signalFault = false) {
+#if USE_RGB_LEAK_LED
+  bool redOn = false;
+  bool greenOn = false;
+  bool blueOn = false;
+  if (signalFault && RGB_SHOW_SIGNAL_FAULT) {
+    // Magenta means the acoustic path is overloaded or clipped.
+    redOn = true;
+    blueOn = true;
+  } else {
+    switch (leakLevel) {
+      case LEAK_LEVEL_NONE:
+        greenOn = true;
+        break;
+      case LEAK_LEVEL_SMALL:
+        redOn = true;
+        break;
+      case LEAK_LEVEL_MEDIUM:
+        redOn = true;
+        greenOn = true;
+        break;
+      case LEAK_LEVEL_LARGE:
+        blueOn = true;
+        break;
+      default:
+        break;
+    }
+  }
+  writeRgbPin(RGB_RED_PIN, redOn);
+  writeRgbPin(RGB_GREEN_PIN, greenOn);
+  writeRgbPin(RGB_BLUE_PIN, blueOn);
+#elif USE_LEAK_LEVEL_LEDS
+  writeLedPin(SMALL_LED_PIN, leakLevel == LEAK_LEVEL_SMALL);
+  writeLedPin(MEDIUM_LED_PIN, leakLevel == LEAK_LEVEL_MEDIUM);
+  writeLedPin(LARGE_LED_PIN, leakLevel == LEAK_LEVEL_LARGE);
+#else
+  writeLedPin(SMALL_LED_PIN, leakLevel != LEAK_LEVEL_NONE);
+#endif
+}
+// Load the embedded TensorFlow model once at startup.
+void setupModel() {
+  const tflite::Model* model = tflite::GetModel(g_leak_model_data);
+  static tflite::MicroInterpreter static_interpreter(
+    model,
+    resolver,
+    tensor_arena,
+    TENSOR_ARENA_SIZE,
+    &micro_error_reporter
+  );
+  interpreter = &static_interpreter;
+  if (interpreter->AllocateTensors() != kTfLiteOk) {
+    Serial.println("AllocateTensors failed");
+    while (true) {
+      delay(1000);
+    }
+  }
+}
+// Configure the INMP441 microphone over I2S.
+void setupMic() {
+  const i2s_config_t i2s_config = {
+    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
+    .sample_rate = SAMPLE_RATE,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
+    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+    .communication_format = I2S_COMM_FORMAT_I2S,
+    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+    .dma_buf_count = 4,
+    .dma_buf_len = 256,
+    .use_apll = false,
+    .tx_desc_auto_clear = false,
+    .fixed_mclk = 0
+  };
+  const i2s_pin_config_t pin_config = {
+    .bck_io_num = I2S_SCK_PIN,
+    .ws_io_num = I2S_WS_PIN,
+    .data_out_num = I2S_PIN_NO_CHANGE,
+    .data_in_num = I2S_SD_PIN
+  };
+  i2s_driver_install(I2S_PORT, &i2s_config, 0, nullptr);
+  i2s_set_pin(I2S_PORT, &pin_config);
+  i2s_zero_dma_buffer(I2S_PORT);
+}
+// Read one audio window, remove DC offset, and convert to 16-bit samples.
+bool readMicWindow() {
+  size_t bytes_read = 0;
+  esp_err_t result = i2s_read(
+    I2S_PORT,
+    raw_samples,
+    sizeof(raw_samples),
+    &bytes_read,
+    portMAX_DELAY
+  );
+  if (result != ESP_OK || bytes_read != sizeof(raw_samples)) {
+    return false;
+  }
+  long long sum = 0;
+  for (int i = 0; i < WINDOW_SAMPLES; i++) {
+    sum += raw_samples[i];
+  }
+  int32_t mean = (int32_t)(sum / WINDOW_SAMPLES);
+  clippedSampleCount = 0;
+  for (int i = 0; i < WINDOW_SAMPLES; i++) {
+    int32_t centered = raw_samples[i] - mean;
+    int32_t shifted = centered >> 8;
+    if (shifted > 32767) shifted = 32767;
+    if (shifted < -32768) shifted = -32768;
+    audio_i16[i] = (int16_t)shifted;
+    if (abs((int)audio_i16[i]) >= 32760) {
+      clippedSampleCount++;
+    }
+  }
+  return true;
+}
+float computeRms(const int16_t* audio) {
+  double sum_sq = 0.0;
+  for (int i = 0; i < WINDOW_SAMPLES; i++) {
+    double value = (double)audio[i];
+    sum_sq += value * value;
+  }
+  return (float)sqrt(sum_sq / WINDOW_SAMPLES + 1e-12);
+}
+float computeZeroCrossingRate(const int16_t* audio) {
+  int crossings = 0;
+  for (int i = 1; i < WINDOW_SAMPLES; i++) {
+    bool prev = audio[i - 1] >= 0;
+    bool curr = audio[i] >= 0;
+    if (prev != curr) {
+      crossings++;
+    }
+  }
+  return (float)crossings / (float)(WINDOW_SAMPLES - 1);
+}
+// Build simple frequency features used by both the model and the leak rules.
+void computeSpectralFeatures(
+  const int16_t* audio,
+  float& peak_frequency_hz,
+  float& spectral_centroid_hz,
+  float& low_band_energy,
+  float& mid_band_energy,
+  float& high_band_energy
+) {
+  const int bins = WINDOW_SAMPLES / 2 + 1;
+  float max_magnitude = -1.0f;
+  int peak_index = 0;
+  float magnitude_sum = 0.0f;
+  float weighted_sum = 0.0f;
+  low_band_energy = 0.0f;
+  mid_band_energy = 0.0f;
+  high_band_energy = 0.0f;
+  for (int k = 0; k < bins; k++) {
+    double real_part = 0.0;
+    double imag_part = 0.0;
+    for (int n = 0; n < WINDOW_SAMPLES; n++) {
+      double angle = -2.0 * PI * (double)k * (double)n / (double)WINDOW_SAMPLES;
+      real_part += (double)audio[n] * cos(angle);
+      imag_part += (double)audio[n] * sin(angle);
+    }
+    float magnitude = (float)sqrt(real_part * real_part + imag_part * imag_part);
+    float freq = ((float)k * SAMPLE_RATE) / WINDOW_SAMPLES;
+    float power = magnitude * magnitude;
+    if (magnitude > max_magnitude) {
+      max_magnitude = magnitude;
+      peak_index = k;
+    }
+    magnitude_sum += magnitude;
+    weighted_sum += freq * magnitude;
+    if (freq < 1000.0f) {
+      low_band_energy += power;
+    } else if (freq < 4000.0f) {
+      mid_band_energy += power;
+    } else if (freq <= 8000.0f) {
+      high_band_energy += power;
+    }
+  }
+  peak_frequency_hz = ((float)peak_index * SAMPLE_RATE) / WINDOW_SAMPLES;
+  spectral_centroid_hz = (magnitude_sum > 0.0f) ? (weighted_sum / magnitude_sum) : 0.0f;
+}
+void calibrateVibrationBaseline() {
+#if USE_VIBRATION_ASSIST && VIBRATION_SENSOR_IS_PIEZO
+  long baselineSum = 0;
+  for (int i = 0; i < PIEZO_CALIBRATION_SAMPLES; i++) {
+    int burstSum = 0;
+    for (int j = 0; j < PIEZO_SAMPLE_BURST; j++) {
+      burstSum += analogRead(VIBRATION_PIN);
+      delayMicroseconds(250);
+    }
+    baselineSum += (burstSum / PIEZO_SAMPLE_BURST);
+    delay(5);
+  }
+  vibrationBaseline = (int)(baselineSum / PIEZO_CALIBRATION_SAMPLES);
+  vibrationBaselineReady = true;
+  vibrationLastRaw = vibrationBaseline;
+  vibrationLastDelta = 0;
+  vibrationHeldDelta = 0;
+  vibrationPeakDelta = 0;
+  vibrationSpikeHoldUntilMs = 0;
+#elif USE_VIBRATION_ASSIST
+  long baselineSum[3] = {0, 0, 0};
+  for (int i = 0; i < GY61_CALIBRATION_SAMPLES; i++) {
+    long burstSum[3] = {0, 0, 0};
+    for (int j = 0; j < GY61_SAMPLE_BURST; j++) {
+      for (int axis = 0; axis < 3; axis++) {
+        burstSum[axis] += analogRead(gy61Pins[axis]);
+      }
+      delayMicroseconds(250);
+    }
+    for (int axis = 0; axis < 3; axis++) {
+      baselineSum[axis] += burstSum[axis] / GY61_SAMPLE_BURST;
+    }
+    delay(5);
+  }
+  for (int axis = 0; axis < 3; axis++) {
+    gy61Baseline[axis] = (int)(baselineSum[axis] / GY61_CALIBRATION_SAMPLES);
+    gy61LastRaw[axis] = gy61Baseline[axis];
+  }
+  vibrationBaseline =
+    (gy61Baseline[0] + gy61Baseline[1] + gy61Baseline[2]) / 3;
+  vibrationBaselineReady = true;
+  vibrationLastRaw = 0;
+  vibrationLastDelta = 0;
+  vibrationHeldDelta = 0;
+  vibrationPeakDelta = 0;
+  vibrationSpikeHoldUntilMs = 0;
+#endif
+}
+// Sample the vibration sensor and refresh the short helper gate.
+void updateVibrationState() {
+#if USE_VIBRATION_ASSIST
+#if VIBRATION_SENSOR_IS_PIEZO
+  int localPeakDelta = 0;
+  int localLastRaw = 0;
+  float localDeltaSum = 0.0f;
+  float localActiveDeltaSum = 0.0f;
+  float localActiveDeltaSquareSum = 0.0f;
+  int localActiveCount = 0;
+  for (int i = 0; i < PIEZO_SAMPLE_BURST; i++) {
+    int raw = analogRead(VIBRATION_PIN);
+    localLastRaw = raw;
+    if (!vibrationBaselineReady) {
+      vibrationBaseline = raw;
+      vibrationBaselineReady = true;
+    }
+    int delta = abs(raw - vibrationBaseline);
+    localDeltaSum += delta;
+    if (delta > localPeakDelta) {
+      localPeakDelta = delta;
+    }
+    if (delta >= VIBRATION_FEATURE_ACTIVITY_DELTA) {
+      localActiveDeltaSum += delta;
+      localActiveDeltaSquareSum += (float)delta * (float)delta;
+      localActiveCount++;
+    }
+    if (delta <= PIEZO_BASELINE_UPDATE_LIMIT) {
+      vibrationBaseline =
+        (int)((1.0f - PIEZO_BASELINE_ALPHA) * vibrationBaseline +
+              PIEZO_BASELINE_ALPHA * raw);
+    }
+  }
+  vibrationLastRaw = localLastRaw;
+  if (localPeakDelta >= PIEZO_HIT_THRESHOLD) {
+    vibrationHeldDelta = localPeakDelta;
+    vibrationSpikeHoldUntilMs = millis() + VIBRATION_SPIKE_HOLD_MS;
+  } else if (millis() >= vibrationSpikeHoldUntilMs) {
+    vibrationHeldDelta = 0;
+  }
+  vibrationLastDelta = localPeakDelta > vibrationHeldDelta
+    ? localPeakDelta
+    : vibrationHeldDelta;
+  float localBurstMean = localDeltaSum / PIEZO_SAMPLE_BURST;
+  float localActiveMean = 0.0f;
+  float localVariance = 0.0f;
+  if (localActiveCount > 0) {
+    localActiveMean = localActiveDeltaSum / localActiveCount;
+    float meanSquare = localActiveDeltaSquareSum / localActiveCount;
+    localVariance = meanSquare - (localActiveMean * localActiveMean);
+    if (localVariance < 0.0f) {
+      localVariance = 0.0f;
+    }
+  }
+  updateEngineeredVibrationFeatures(
+    (float)localPeakDelta,
+    localActiveMean,
+    localVariance,
+    localBurstMean
+  );
+  if (vibrationLastDelta > vibrationPeakDelta) {
+    vibrationPeakDelta = vibrationLastDelta;
+  }
+  if (localPeakDelta >= PIEZO_HIT_THRESHOLD) {
+    vibrationHoldUntilMs = millis() + VIBRATION_HOLD_MS;
+    vibrationEdgeCount++;
+  }
+#else
+  int localPeakDelta = 0;
+  float localDeltaSum = 0.0f;
+  float localActiveDeltaSum = 0.0f;
+  float localActiveDeltaSquareSum = 0.0f;
+  int localActiveCount = 0;
+  for (int i = 0; i < GY61_SAMPLE_BURST; i++) {
+    int raw[3] = {0, 0, 0};
+    for (int axis = 0; axis < 3; axis++) {
+      raw[axis] = analogRead(gy61Pins[axis]);
+      gy61LastRaw[axis] = raw[axis];
+    }
+    if (!vibrationBaselineReady) {
+      for (int axis = 0; axis < 3; axis++) {
+        gy61Baseline[axis] = raw[axis];
+      }
+      vibrationBaselineReady = true;
+    }
+    float deltaMagnitudeSquared = 0.0f;
+    for (int axis = 0; axis < 3; axis++) {
+      int axisDelta = abs(raw[axis] - gy61Baseline[axis]);
+      deltaMagnitudeSquared += (float)axisDelta * (float)axisDelta;
+    }
+    float rawDeltaMagnitude = sqrtf(deltaMagnitudeSquared);
+    int scaledDelta = (int)lroundf(rawDeltaMagnitude * GY61_DELTA_SCALE);
+    localDeltaSum += scaledDelta;
+    if (scaledDelta > localPeakDelta) {
+      localPeakDelta = scaledDelta;
+    }
+    if (scaledDelta >= VIBRATION_FEATURE_ACTIVITY_DELTA) {
+      localActiveDeltaSum += scaledDelta;
+      localActiveDeltaSquareSum += (float)scaledDelta * (float)scaledDelta;
+      localActiveCount++;
+    }
+    if (rawDeltaMagnitude <= GY61_BASELINE_UPDATE_LIMIT) {
+      for (int axis = 0; axis < 3; axis++) {
+        gy61Baseline[axis] =
+          (int)((1.0f - GY61_BASELINE_ALPHA) * gy61Baseline[axis] +
+                GY61_BASELINE_ALPHA * raw[axis]);
+      }
+    }
+    delayMicroseconds(250);
+  }
+  vibrationBaseline =
+    (gy61Baseline[0] + gy61Baseline[1] + gy61Baseline[2]) / 3;
+  vibrationLastRaw = localPeakDelta;
+  if (localPeakDelta >= GY61_HIT_THRESHOLD) {
+    vibrationHeldDelta = localPeakDelta;
+    vibrationSpikeHoldUntilMs = millis() + VIBRATION_SPIKE_HOLD_MS;
+  } else if (millis() >= vibrationSpikeHoldUntilMs) {
+    vibrationHeldDelta = 0;
+  }
+  vibrationLastDelta = localPeakDelta > vibrationHeldDelta
+    ? localPeakDelta
+    : vibrationHeldDelta;
+  float localBurstMean = localDeltaSum / GY61_SAMPLE_BURST;
+  float localActiveMean = 0.0f;
+  float localVariance = 0.0f;
+  if (localActiveCount > 0) {
+    localActiveMean = localActiveDeltaSum / localActiveCount;
+    float meanSquare = localActiveDeltaSquareSum / localActiveCount;
+    localVariance = meanSquare - (localActiveMean * localActiveMean);
+    if (localVariance < 0.0f) {
+      localVariance = 0.0f;
+    }
+  }
+  updateEngineeredVibrationFeatures(
+    (float)localPeakDelta,
+    localActiveMean,
+    localVariance,
+    localBurstMean
+  );
+  if (vibrationLastDelta > vibrationPeakDelta) {
+    vibrationPeakDelta = vibrationLastDelta;
+  }
+  if (localPeakDelta >= GY61_HIT_THRESHOLD) {
+    vibrationHoldUntilMs = millis() + VIBRATION_HOLD_MS;
+    vibrationEdgeCount++;
+  }
+#endif
+#endif
+}
+bool vibrationTriggered() {
+#if USE_VIBRATION_ASSIST
+  return millis() < vibrationHoldUntilMs;
+#else
+  return false;
+#endif
+}
+void setupI2CBus() {
+#if USE_OLED_DISPLAY
+  Wire.begin(OLED_I2C_SDA_PIN, OLED_I2C_SCL_PIN);
+  Wire.setClock(400000);
+#endif
+#if USE_BME680_ENV_SENSOR
+  bmeWire.begin(BME_I2C_SDA_PIN, BME_I2C_SCL_PIN);
+  bmeWire.setClock(100000);
+#endif
+}
+void setupDisplay() {
+#if USE_OLED_DISPLAY
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDRESS_PRIMARY)) {
+    Serial.println("SSD1306 init failed");
+    oledDisplayReady = false;
+    return;
+  }
+  oledI2CAddressInUse = OLED_I2C_ADDRESS_PRIMARY;
+  display.ssd1306_command(SSD1306_DISPLAYON);
+  display.dim(false);
+  oledDisplayReady = true;
+  showDisplayBootSplash();
+#else
+  Serial.println("OLED disabled");
+#endif
+}
+void showDisplayBootSplash() {
+#if USE_OLED_DISPLAY
+  if (!oledDisplayReady) {
+    return;
+  }
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("GME12864-11 Test");
+  display.setTextSize(2);
+  display.setCursor(0, 18);
+  display.println("HELLO");
+  display.setTextSize(1);
+  display.setCursor(0, 50);
+  display.println("OLED working");
+  display.display();
+  delay(DISPLAY_BOOT_SPLASH_MS);
+#endif
+}
+void setupEnvironmentSensor() {
+#if USE_BME680_ENV_SENSOR
+    if (!bme680.begin(BME680_I2C_ADDRESS_PRIMARY) &&
+      !bme680.begin(BME680_I2C_ADDRESS_SECONDARY)) {
+    Serial.println("BME680 init failed");
+    envSensorReady = false;
+    return;
+  }
+  envSensorReady = true;
+  bme680.setTemperatureOversampling(BME680_OS_8X);
+  bme680.setHumidityOversampling(BME680_OS_2X);
+  bme680.setPressureOversampling(BME680_OS_4X);
+  bme680.setIIRFilterSize(BME680_FILTER_SIZE_3);
+  bme680.setGasHeater(320, 150);
+  updateEnvironmentState();
+#else
+  Serial.println("Adafruit_BME680 library not found; env sensor disabled");
+#endif
+}
+void updateEnvironmentState() {
+#if USE_BME680_ENV_SENSOR
+  if (!envSensorReady) {
+    return;
+  }
+  if ((lastEnvSampleMs != 0) &&
+      (millis() - lastEnvSampleMs < ENV_SAMPLE_INTERVAL_MS)) {
+    return;
+  }
+  if (!bme680.performReading()) {
+    Serial.println("BME680 read failed");
+    lastEnvSampleMs = millis();
+    return;
+  }
+  envTemperatureC = bme680.temperature;
+  envHumidityPct = bme680.humidity;
+  envPressureHpa = bme680.pressure / 100.0f;
+  envGasKOhms = bme680.gas_resistance / 1000.0f;
+  lastEnvSampleMs = millis();
+#endif
+}
+void updateLocalDisplay(
+  LeakLevel displayedLevel,
+  float probability,
+  float soundLevel,
+  int vibrationDelta
+) {
+#if USE_OLED_DISPLAY
+  (void)probability;
+  if (!oledDisplayReady) {
+    return;
+  }
+  if ((lastDisplayRefreshMs != 0) &&
+      (millis() - lastDisplayRefreshMs < DISPLAY_REFRESH_MS)) {
+    return;
+  }
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("Leak Detector");
+  display.setTextSize(2);
+  display.setCursor(0, 14);
+  display.println(leakLevelLabel(displayedLevel));
+  display.setTextSize(1);
+  display.setCursor(0, 38);
+  display.print("A:");
+  display.print((int)soundLevel);
+  display.print(" V:");
+  display.println(vibrationDelta);
+  display.setCursor(0, 52);
+  display.print("T:");
+  if (envSensorReady && !isnan(envTemperatureC)) {
+    display.print(envTemperatureC, 1);
+    display.print("C");
+  } else {
+    display.print("--.-C");
+  }
+  display.print(" H:");
+  if (envSensorReady && !isnan(envHumidityPct)) {
+    display.print(envHumidityPct, 0);
+    display.print("%");
+  } else {
+    display.print("--%");
+  }
+  display.display();
+  lastDisplayRefreshMs = millis();
+#else
+  (void)displayedLevel;
+  (void)probability;
+  (void)soundLevel;
+  (void)vibrationDelta;
+#endif
+}
+#if ENABLE_AWS_IOT
+void connectAWS() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Connecting to WiFi...");
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect(true, true);
+    delay(1000);
+    WiFi.begin(ssid, password);
+    unsigned long wifiStart = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 20000) {
+      Serial.print(".");
+      delay(500);
+    }
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("\nWiFi failed");
+      return;
+    }
+    Serial.println("\nWiFi Connected");
+    Serial.print("IP: ");
+    Serial.println(WiFi.localIP());
+  }
+  net.setCACert(ROOT_CA);
+  net.setCertificate(DEVICE_CERT);
+  net.setPrivateKey(PRIVATE_KEY);
+  client.setServer(AWS_ENDPOINT, 8883);
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  Serial.print("Syncing time");
+  time_t now = time(nullptr);
+  unsigned long timeStart = millis();
+  while (now < 100000 && millis() - timeStart < 20000) {
+    delay(500);
+    Serial.print(".");
+    now = time(nullptr);
+  }
+  Serial.println();
+  if (now < 100000) {
+    Serial.println("Time sync failed");
+    return;
+  }
+  if (client.connected()) {
+    Serial.println("Already connected to AWS IoT");
+    return;
+  }
+  Serial.println("Connecting to AWS IoT...");
+  unsigned long awsStart = millis();
+  while (!client.connect(DEVICE_ID) && millis() - awsStart < 20000) {
+    Serial.print("MQTT state: ");
+    Serial.println(client.state());
+    delay(1000);
+  }
+  if (client.connected()) {
+    Serial.println("Connected to AWS IoT!");
+  } else {
+    Serial.print("AWS failed, state = ");
+    Serial.println(client.state());
+  }
+}
+void publishLeakTelemetry(
+  float soundLevel,
+  float peakFrequency,
+  float spectralCenter,
+  float zeroCrossRate,
+  float probability,
+  int vibrationDelta,
+  float vibrationMean,
+  float vibrationVariance,
+  float vibrationTrend,
+  float vibrationSustain,
+  LeakLevel displayedLevel,
+  bool ledOn
+) {
+  if (millis() - lastAwsPublishMs < AWS_PUBLISH_INTERVAL_MS) {
+    return;
+  }
+  if (!client.connected()) {
+    connectAWS();
+  }
+  if (!client.connected()) {
+    return;
+  }
+  float acoustic = soundLevel;
+  int vibration = vibrationPeakDelta;
+  float publishedConfidence = displayedLevel == LEAK_LEVEL_NONE ? 0.0f : probability;
+  time_t now = time(nullptr);
+  bool envValuesReady = envSensorReady && !isnan(envTemperatureC) && !isnan(envHumidityPct);
+  Serial.print("Sound: ");
+  Serial.print(acoustic);
+  Serial.print(" | Vibration: ");
+  Serial.println(vibration);
+  String payload = "{";
+  payload += "\"device_id\":\"" + String(DEVICE_ID) + "\",";
+  payload += "\"timestamp\":" + String((unsigned long)now) + ",";
+  payload += "\"moisture\":";
+  payload += envValuesReady ? String(envHumidityPct, 1) : String("null");
+  payload += ",\"temperature\":";
+  payload += envSensorReady && !isnan(envTemperatureC) ? String(envTemperatureC, 1) : String("null");
+  payload += ",\"vibration\":" + String(vibration) + ",";
+  payload += "\"acoustic\":" + String(soundLevel, 2) + ",";
+  payload += "\"confidence_score\":" + String(publishedConfidence, 6);
+  payload += ",\"model_score\":" + String(probability, 6);
+  payload += ",\"leak_level\":" + String((int)displayedLevel);
+  payload += ",\"led_on\":" + String(ledOn ? 1 : 0);
+  payload += ",\"led_color\":\"";
+  payload += leakLevelColorName(displayedLevel);
+  payload += "\"";
+  payload += "}";
+  Serial.println(payload);
+  if (client.publish(awsTopic.c_str(), payload.c_str())) {
+    Serial.println("AWS publish ok");
+  } else {
+    Serial.println("AWS publish failed");
+  }
+  lastAwsPublishMs = millis();
+}
+#endif
+// Main pipeline: capture audio, extract features, run the model, then apply leak rules.
+void runLiveModel() {
+  if (!readMicWindow()) {
+    Serial.println("Mic read failed");
+    setLeakOutputs(LEAK_LEVEL_NONE);
+    delay(20);
+    return;
+  }
+  float features[FEATURE_COUNT] = {0.0f};
+  float normalized[FEATURE_COUNT] = {0.0f};
+  features[0] = computeRms(audio_i16);
+  computeSpectralFeatures(
+    audio_i16,
+    features[1],
+    features[2],
+    features[3],
+    features[4],
+    features[5]
+  );
+  features[6] = computeZeroCrossingRate(audio_i16);
+  updateVibrationState();
+  updateEnvironmentState();
+  features[9] = vibrationMagnitudeFeature;
+  features[10] = vibrationMeanFeature;
+  features[11] = vibrationVarianceFeature;
+  features[12] = vibrationTrendFeature;
+  normalize_features(features, normalized);
+  // The deployed model was tuned without meaningful vibration scaling, so keep
+  // those slots neutral while we use the engineered vibration features in the
+  // rule-based demo layer and serial logs.
+  for (int i = 9; i < FEATURE_COUNT; i++) {
+    normalized[i] = 0.0f;
+  }
+  TfLiteTensor* input = interpreter->input(0);
+  for (int i = 0; i < FEATURE_COUNT; i++) {
+    input->data.f[i] = normalized[i];
+  }
+  if (interpreter->Invoke() != kTfLiteOk) {
+    Serial.println("Model invoke failed");
+    setLeakOutputs(LEAK_LEVEL_NONE);
+    delay(20);
+    return;
+  }
+  float probability = interpreter->output(0)->data.f[0];
+  // The model gives leak likelihood; these rules decide confidence and leak size.
+  bool vibrationGate = vibrationTriggered();
+  int vibrationPinState = HIGH;
+  bool vibrationRawActive = false;
+#if USE_VIBRATION_ASSIST
+#if VIBRATION_SENSOR_IS_PIEZO
+  vibrationPinState = vibrationLastRaw;
+  vibrationRawActive = vibrationLastDelta >= PIEZO_HIT_THRESHOLD;
+#else
+  vibrationPinState = vibrationLastRaw;
+  vibrationRawActive = vibrationLastDelta >= GY61_HIT_THRESHOLD;
+#endif
+#endif
+  bool signalFault =
+    (features[0] >= MAX_VALID_SOUND_LEVEL) ||
+    (clippedSampleCount >= MAX_CLIPPED_SAMPLES);
+  bool vibrationMediumPattern = vibrationSupportsMedium(
+    vibrationLastDelta,
+    vibrationMeanFeature,
+    vibrationVarianceFeature,
+    vibrationTrendFeature,
+    vibrationSustainFeature
+  );
+  bool vibrationLargePattern = vibrationSupportsLarge(
+    vibrationLastDelta,
+    vibrationMeanFeature,
+    vibrationVarianceFeature,
+    vibrationTrendFeature,
+    vibrationSustainFeature
+  );
+  bool normalFlowBaseline = isClampNormalFlowBaseline(
+    features[0],
+    features[2],
+    features[6],
+    probability,
+    vibrationLastDelta,
+    vibrationMeanFeature,
+    vibrationSustainFeature
+  );
+  bool largeLeakFlowOverride =
+    !signalFault &&
+    isClampLargeLeakInFlow(
+      features[0],
+      features[2],
+      features[6],
+      probability,
+      vibrationLastDelta,
+      vibrationMeanFeature,
+      vibrationTrendFeature,
+      vibrationSustainFeature
+    );
+  bool smallLeakFlowOverride =
+    !signalFault &&
+    !largeLeakFlowOverride &&
+    isClampSmallLeakInFlow(
+      features[0],
+      features[2],
+      features[6],
+      probability,
+      vibrationSustainFeature
+    );
+  normalFlowBaseline = normalFlowBaseline && !smallLeakFlowOverride && !largeLeakFlowOverride;
+  bool nearNormalFlowBaseline =
+    !signalFault &&
+    !smallLeakFlowOverride &&
+    !largeLeakFlowOverride &&
+    isClampNearNormalFlowBaseline(
+      features[0],
+      features[2],
+      features[6],
+      probability,
+      vibrationSustainFeature
+    );
+  normalFlowBaseline = normalFlowBaseline || nearNormalFlowBaseline;
+  // threshold: live large-preview version of the large transition pattern
+  bool largeLeakPreview =
+    !signalFault &&
+    !normalFlowBaseline &&
+    (
+      (
+        (features[0] >= 16000.0f) &&
+        (features[2] >= 2800.0f) &&
+        (features[6] >= 0.19f) &&
+        (probability >= 0.80f)
+      ) ||
+      (
+        (features[0] >= 19000.0f) &&
+        (features[2] >= 2550.0f) &&
+        (features[6] >= 0.20f) &&
+        (probability >= 0.60f)
+      )
+    );
+  bool audioGate =
+    (features[0] >= MIN_SOUND_LEVEL) &&
+    (features[6] >= MIN_ZERO_CROSS_RATE) &&
+    !signalFault &&
+    !normalFlowBaseline;
+  bool strongModelGate = probability >= STRONG_LEAK_THRESHOLD;
+  bool assistModelGate = probability >= ASSIST_LEAK_THRESHOLD;
+  bool featureAssistGate =
+    (features[2] >= ASSIST_SPECTRAL_CENTER) &&
+    (features[6] >= ASSIST_ZERO_CROSS_RATE);
+  bool strongCandidate = audioGate && strongModelGate;
+  bool assistedCandidate =
+    audioGate &&
+    vibrationGate &&
+    (vibrationMediumPattern || (vibrationLastDelta >= 80)) &&
+    assistModelGate &&
+    featureAssistGate;
+  bool candidateLeak = strongCandidate || assistedCandidate;
+  int requiredConsecutive = vibrationGate ?
+    REQUIRED_CONSECUTIVE_WITH_VIBRATION :
+    REQUIRED_CONSECUTIVE_STRONG;
+#if !USE_VIBRATION_ASSIST
+  requiredConsecutive = 1;
+#endif
+  if (candidateLeak) {
+    consecutiveLeakCount++;
+  } else {
+    consecutiveLeakCount = 0;
+  }
+  if (signalFault) {
+    consecutiveLeakCount = 0;
+  }
+  bool leakDetected = consecutiveLeakCount >= requiredConsecutive;
+  bool vibrationAssist = vibrationGate || vibrationRawActive;
+  bool demoAcousticGate =
+    !signalFault &&
+    !normalFlowBaseline &&
+    (features[0] >= DEMO_SOUND_LEVEL) &&
+    (features[2] >= DEMO_SPECTRAL_CENTER) &&
+    (features[6] >= DEMO_ZERO_CROSS_RATE);
+  bool modelBurst =
+    !signalFault &&
+    !normalFlowBaseline &&
+    (probability >= DEMO_MODEL_THRESHOLD);
+  // Extra burst rules help the demo react faster to known small/medium/large patterns.
+  bool smallLeakWhistleBurst =
+    !signalFault &&
+    !normalFlowBaseline &&
+    !vibrationAssist &&
+    (features[0] >= SMALL_LEAK_WHISTLE_SOUND_LEVEL) &&
+    (features[2] >= SMALL_LEAK_WHISTLE_SPECTRAL_CENTER) &&
+    (features[6] >= SMALL_LEAK_WHISTLE_ZERO_CROSS_RATE) &&
+    (probability >= SMALL_LEAK_WHISTLE_MODEL_THRESHOLD);
+  // threshold: keep medium displayed when the signal stays around 12k+/2150+/0.16+
+  bool mediumDisplaySustain =
+    (displayedLeakLevel == LEAK_LEVEL_MEDIUM) &&
+    !signalFault &&
+    !normalFlowBaseline &&
+    (features[0] >= 13000.0f) &&
+    (features[2] >= 2250.0f) &&
+    (features[6] >= 0.16f) &&
+    (
+      (probability >= 0.45f) ||
+      ((probability >= 0.30f) && vibrationMediumPattern)
+    );
+  bool displaySustainEvidence =
+    !signalFault &&
+    !normalFlowBaseline &&
+    (
+      (
+        (features[0] >= DISPLAY_SUSTAIN_SOUND_LEVEL) &&
+        (features[2] >= DISPLAY_SUSTAIN_SPECTRAL_CENTER) &&
+        (features[6] >= DISPLAY_SUSTAIN_ZERO_CROSS_RATE) &&
+        (probability >= DISPLAY_SUSTAIN_MODEL_THRESHOLD)
+      ) ||
+      (
+        vibrationAssist &&
+        (probability >= ASSIST_LEAK_THRESHOLD) &&
+        featureAssistGate
+      ) ||
+      mediumDisplaySustain
+    );
+  // threshold: keep large displayed when the signal stays around 17k+/2500+/0.19+
+  bool largeDisplaySustain =
+    (displayedLeakLevel == LEAK_LEVEL_LARGE) &&
+    !signalFault &&
+    !normalFlowBaseline &&
+    (features[0] >= 17000.0f) &&
+    (features[2] >= 2500.0f) &&
+    (features[6] >= 0.19f) &&
+    (
+      (probability >= 0.35f) ||
+      ((probability >= 0.15f) && vibrationLargePattern)
+    );
+  displaySustainEvidence =
+    displaySustainEvidence ||
+    largeDisplaySustain;
+  // threshold: direct small-leak burst reserved for whistle-like or flow-sustain signatures
+  bool smallLeakDirectBurst =
+    smallLeakWhistleBurst ||
+    smallLeakFlowOverride;
+  // threshold: direct medium-leak burst bands in the normal working range
+  bool mediumLeakDirectBurst =
+    !signalFault &&
+    !normalFlowBaseline &&
+    (
+      (
+        (features[0] >= 15000.0f) &&
+        (features[2] >= 2400.0f) &&
+        (features[6] >= 0.16f) &&
+        (probability >= 0.88f)
+      ) ||
+      (
+        (features[0] >= 12500.0f) &&
+        (features[2] >= 2300.0f) &&
+        (features[6] >= 0.16f) &&
+        (probability >= 0.82f) &&
+        vibrationMediumPattern
+      ) ||
+      (
+        (features[0] >= 13500.0f) &&
+        (features[2] >= 2150.0f) &&
+        (features[6] >= 0.16f) &&
+        (probability >= 0.70f) &&
+        (vibrationLastDelta >= 180) &&
+        !largeLeakPreview
+      )
+    );
+  // threshold: direct large-leak burst bands for the strongest jet-like events
+  bool largeLeakBurst =
+    largeLeakFlowOverride ||
+    (
+      !signalFault &&
+      !normalFlowBaseline &&
+      (
+        (
+          (features[0] >= LARGE_LEAK_SOUND_LEVEL) &&
+          (probability >= 0.95f) &&
+          (features[6] >= 0.14f) &&
+          (features[2] >= 2200.0f)
+        ) ||
+        (
+          (features[0] >= 26000.0f) &&
+          (features[2] >= 3000.0f) &&
+          (features[6] >= 0.30f) &&
+          (probability >= 0.98f)
+        ) ||
+        (
+          (features[0] >= 22000.0f) &&
+          (features[2] >= 2900.0f) &&
+          (features[6] >= 0.30f) &&
+          (probability >= 0.98f)
+        ) ||
+        (
+          (features[0] >= 15000.0f) &&
+          (features[2] >= 2500.0f) &&
+          (features[6] >= 0.19f) &&
+          (probability >= 0.75f) &&
+          vibrationLargePattern
+        ) ||
+        largeLeakPreview
+      )
+    );
+#if USE_VIBRATION_ASSIST
+  bool assistBurst =
+    vibrationAssist &&
+    !normalFlowBaseline &&
+    demoAcousticGate &&
+    featureAssistGate &&
+    (vibrationMediumPattern || (vibrationLastDelta >= 80)) &&
+    modelBurst;
+  bool demoLeakInstant =
+    (
+      leakDetected ||
+      smallLeakDirectBurst ||
+      mediumLeakDirectBurst ||
+      largeLeakBurst ||
+      assistBurst ||
+      smallLeakWhistleBurst
+    );
+#else
+  bool demoLeakInstant =
+    strongCandidate ||
+    smallLeakDirectBurst ||
+    mediumLeakDirectBurst ||
+    largeLeakBurst ||
+    (demoAcousticGate && modelBurst) ||
+    smallLeakWhistleBurst;
+#endif
+  if (signalFault || normalFlowBaseline) {
+    largeLeakBurstCount = 0;
+  } else if (largeLeakBurst) {
+    largeLeakBurstCount++;
+  } else {
+    largeLeakBurstCount = 0;
+  }
+  bool largeLeakConfirmed =
+    largeLeakFlowOverride ||
+    (largeLeakBurstCount >= LARGE_BURST_CONFIRM_COUNT);
+  if (normalFlowBaseline) {
+    demoLeakInstant = false;
+    demoLeakCount = 0;
+    largeLeakBurstCount = 0;
+    consecutiveLeakCount = 0;
+  }
+  if (demoLeakInstant) {
+    demoLeakCount++;
+  } else {
+    demoLeakCount = 0;
+  }
+#if USE_VIBRATION_ASSIST
+  bool demoLeak =
+    leakDetected ||
+    smallLeakDirectBurst ||
+    largeLeakConfirmed ||
+    (demoLeakCount >= DEMO_CONFIRM_COUNT);
+#else
+  bool demoLeak =
+    leakDetected ||
+    smallLeakDirectBurst ||
+    largeLeakConfirmed ||
+    (demoLeakCount >= DEMO_CONFIRM_COUNT);
+#endif
+  // Hold the strongest detected size briefly so the LED is easier to see.
+  // Only capture leak size from frames that actively confirm a leak.
+  // This avoids mixing unrelated later spikes into the held display event.
+  bool severityEvidence =
+    demoLeakInstant ||
+    leakDetected ||
+    demoLeak;
+  bool holdingLargeLeak =
+    (displayedLeakLevel == LEAK_LEVEL_LARGE) &&
+    (millis() < displayLeakHoldUntilMs);
+  if (largeLeakFlowOverride) {
+    eventPeakLeakLevel = LEAK_LEVEL_LARGE;
+  } else if (
+    smallLeakFlowOverride &&
+    !holdingLargeLeak &&
+    (eventPeakLeakLevel < LEAK_LEVEL_LARGE)
+  ) {
+    eventPeakLeakLevel = LEAK_LEVEL_SMALL;
+  } else if (severityEvidence) {
+    updateLeakEventPeaks(
+      features[0],
+      features[2],
+      features[6],
+      probability,
+      vibrationLastDelta,
+      vibrationMeanFeature,
+      vibrationVarianceFeature,
+      vibrationTrendFeature,
+      vibrationSustainFeature
+    );
+  }
+  LeakLevel instantLeakLevel = LEAK_LEVEL_NONE;
+  if (severityEvidence) {
+    instantLeakLevel = eventPeakLeakLevel;
+  }
+  bool classifiedLeakNow = instantLeakLevel != LEAK_LEVEL_NONE;
+  if (demoLeak && classifiedLeakNow) {
+    displayedLeakLevel = instantLeakLevel;
+    displayLeakHoldUntilMs = millis() + DISPLAY_LEAK_HOLD_MS;
+  } else if (
+    (displayedLeakLevel != LEAK_LEVEL_NONE) &&
+    displaySustainEvidence
+  ) {
+    if (instantLeakLevel != LEAK_LEVEL_NONE) {
+      displayedLeakLevel = instantLeakLevel;
+    }
+    displayLeakHoldUntilMs = millis() + DISPLAY_LEAK_HOLD_MS;
+  } else if (millis() >= displayLeakHoldUntilMs) {
+    displayedLeakLevel = LEAK_LEVEL_NONE;
+    resetLeakEventPeaks();
+  }
+  bool heldFlowLeak =
+    (
+      (displayedLeakLevel == LEAK_LEVEL_SMALL) ||
+      (displayedLeakLevel == LEAK_LEVEL_LARGE)
+    ) &&
+    (millis() < displayLeakHoldUntilMs);
+  if (normalFlowBaseline && !heldFlowLeak) {
+    displayedLeakLevel = LEAK_LEVEL_NONE;
+    displayLeakHoldUntilMs = 0;
+    resetLeakEventPeaks();
+  }
+  unsigned long nowMs = millis();
+  bool alarmEvidence =
+    (demoLeak && classifiedLeakNow) ||
+    (
+      (displayedLeakLevel != LEAK_LEVEL_NONE) &&
+      displaySustainEvidence
+    );
+  if (alarmEvidence) {
+    if ((instantLeakLevel != LEAK_LEVEL_NONE) && (instantLeakLevel > alarmedLeakLevel)) {
+      alarmedLeakLevel = instantLeakLevel;
+    } else if ((alarmedLeakLevel == LEAK_LEVEL_NONE) && (displayedLeakLevel != LEAK_LEVEL_NONE)) {
+      alarmedLeakLevel = displayedLeakLevel;
+    }
+    alarmLeakHoldUntilMs = nowMs + ALARM_LATCH_MIN_MS;
+    alarmQuietSinceMs = 0;
+  } else if (alarmedLeakLevel != LEAK_LEVEL_NONE) {
+    if (alarmQuietSinceMs == 0) {
+      alarmQuietSinceMs = nowMs;
+    }
+    if (
+      (nowMs >= alarmLeakHoldUntilMs) &&
+      ((nowMs - alarmQuietSinceMs) >= ALARM_CLEAR_QUIET_MS)
+    ) {
+      alarmedLeakLevel = LEAK_LEVEL_NONE;
+      alarmLeakHoldUntilMs = 0;
+      alarmQuietSinceMs = 0;
+    }
+  }
+  LeakLevel outputLeakLevel = alarmedLeakLevel != LEAK_LEVEL_NONE ? alarmedLeakLevel : displayedLeakLevel;
+  bool displayLeak = outputLeakLevel != LEAK_LEVEL_NONE;
+  setLeakOutputs(outputLeakLevel, signalFault);
+#if ENABLE_AWS_IOT
+  publishLeakTelemetry(
+    features[0],
+    features[1],
+    features[2],
+    features[6],
+    probability,
+    vibrationLastDelta,
+    vibrationMeanFeature,
+    vibrationVarianceFeature,
+    vibrationTrendFeature,
+    vibrationSustainFeature,
+    outputLeakLevel,
+    displayLeak
+  );
+#endif
+   updateLocalDisplay(
+    outputLeakLevel,
+    probability,
+    features[0],
+    vibrationLastDelta
+  );
+  if (millis() - lastPrintMs >= PRINT_INTERVAL_MS) {
+#if PRESENTATION_SERIAL_OUTPUT
+    unsigned long nowMs = millis();
+    static bool presentationStateReady = false;
+    static LeakLevel lastPresentedLeakLevel = LEAK_LEVEL_NONE;
+    if (!presentationStateReady) {
+      lastPresentedLeakLevel = outputLeakLevel;
+      presentationStateReady = true;
+    } else if (outputLeakLevel != lastPresentedLeakLevel) {
+      printElapsedPrefix(nowMs);
+      Serial.print(PRESENTATION_NODE_LABEL);
+      Serial.print(" EVENT | ");
+      Serial.print(leakLevelLabel(lastPresentedLeakLevel));
+      Serial.print(" -> ");
+      Serial.println(leakLevelLabel(outputLeakLevel));
+      lastPresentedLeakLevel = outputLeakLevel;
+    }
+
+    printElapsedPrefix(nowMs);
+    Serial.print(PRESENTATION_NODE_LABEL);
+    Serial.print(" | ");
+    Serial.print(leakLevelLabel(outputLeakLevel));
+    Serial.print(" | Sound ");
+    Serial.print(features[0], 0);
+    Serial.print(" | Spec ");
+    Serial.print(features[2], 0);
+    Serial.print(" | Vib ");
+    Serial.print(vibrationLastDelta);
+    Serial.print(" | Temp ");
+    bool hasTemp = envSensorReady && !isnan(envTemperatureC);
+    if (hasTemp) {
+      Serial.print(envTemperatureC, 1);
+      Serial.print("C");
+    } else {
+      Serial.print("NA");
+    }
+    Serial.print(" | RH ");
+    bool hasHumidity = envSensorReady && !isnan(envHumidityPct);
+    if (hasHumidity) {
+      Serial.print(envHumidityPct, 1);
+      Serial.println("%");
+    } else {
+      Serial.println("NA");
+    }
+    vibrationPeakDelta = 0;
+#elif COMPACT_SERIAL_OUTPUT
+    Serial.print("SoundLevel:");
+    Serial.print(features[0], 2);
+    Serial.print("\t");
+    Serial.print("SpectralCenter:");
+    Serial.print(features[2], 2);
+    Serial.print("\t");
+    Serial.print("ZeroCross:");
+    Serial.print(features[6], 4);
+    Serial.print("\t");
+    Serial.print("LeakProb:");
+    Serial.print(probability, 6);
+    Serial.print("\t");
+    Serial.print("VibrationDelta:");
+    Serial.print(vibrationLastDelta);
+    Serial.print("\t");
+    Serial.print("VibrationMean:");
+    Serial.print(vibrationMeanFeature, 2);
+    Serial.print("\t");
+    Serial.print("VibrationVar:");
+    Serial.print(vibrationVarianceFeature, 2);
+    Serial.print("\t");
+    Serial.print("VibrationTrend:");
+    Serial.print(vibrationTrendFeature, 2);
+    Serial.print("\t");
+    Serial.print("VibrationSustain:");
+    Serial.print(vibrationSustainFeature, 2);
+    Serial.print("\t");
+    Serial.print("TempC:");
+    if (envSensorReady && !isnan(envTemperatureC)) {
+      Serial.print(envTemperatureC, 1);
+    } else {
+      Serial.print("NA");
+    }
+    Serial.print("\t");
+    Serial.print("Moisture:");
+    if (envSensorReady && !isnan(envHumidityPct)) {
+      Serial.print(envHumidityPct, 1);
+    } else {
+      Serial.print("NA");
+    }
+    Serial.print("\t");
+    Serial.print("LeakLevel:");
+    Serial.println((int)outputLeakLevel);
+    vibrationPeakDelta = 0;
+#else
+    Serial.print("SoundLevel:");
+    Serial.print(features[0], 2);
+    Serial.print("\t");
+    Serial.print("PeakFreq:");
+    Serial.print(features[1], 2);
+    Serial.print("\t");
+    Serial.print("SpectralCenter:");
+    Serial.print(features[2], 2);
+    Serial.print("\t");
+    Serial.print("ZeroCross:");
+    Serial.print(features[6], 4);
+    Serial.print("\t");
+    Serial.print("LeakProb:");
+    Serial.print(probability, 6);
+    Serial.print("\t");
+    Serial.print("AssistFeatureGate:");
+    Serial.print(featureAssistGate ? 1 : 0);
+    Serial.print("\t");
+    Serial.print("VibrationDelta:");
+    Serial.print(vibrationLastDelta);
+    Serial.print("\t");
+    Serial.print("VibrationMean:");
+    Serial.print(vibrationMeanFeature, 2);
+    Serial.print("\t");
+    Serial.print("VibrationVar:");
+    Serial.print(vibrationVarianceFeature, 2);
+    Serial.print("\t");
+    Serial.print("VibrationTrend:");
+    Serial.print(vibrationTrendFeature, 2);
+    Serial.print("\t");
+    Serial.print("VibrationSustain:");
+    Serial.print(vibrationSustainFeature, 2);
+    Serial.print("\t");
+    Serial.print("TempC:");
+    if (envSensorReady && !isnan(envTemperatureC)) {
+      Serial.print(envTemperatureC, 1);
+    } else {
+      Serial.print("NA");
+    }
+    Serial.print("\t");
+    Serial.print("Moisture:");
+    if (envSensorReady && !isnan(envHumidityPct)) {
+      Serial.print(envHumidityPct, 1);
+    } else {
+      Serial.print("NA");
+    }
+    Serial.print("\t");
+    Serial.print("GasKOhm:");
+    if (envSensorReady && !isnan(envGasKOhms)) {
+      Serial.print(envGasKOhms, 1);
+    } else {
+      Serial.print("NA");
+    }
+    Serial.print("\t");
+    Serial.print("VibrationEdges:");
+    Serial.print(vibrationEdgeCount);
+    Serial.print("\t");
+    Serial.print("ClippedSamples:");
+    Serial.print(clippedSampleCount);
+    Serial.print("\t");
+    Serial.print("SignalFault:");
+    Serial.print(signalFault ? 1 : 0);
+    Serial.print("\t");
+    Serial.print("DemoAcoustic:");
+    Serial.print(demoAcousticGate ? 1 : 0);
+    Serial.print("\t");
+    Serial.print("ModelBurst:");
+    Serial.print(modelBurst ? 1 : 0);
+    Serial.print("\t");
+    Serial.print("VibrationAssist:");
+    Serial.print(vibrationAssist ? 1 : 0);
+    Serial.print("\t");
+    Serial.print("DemoLeak:");
+    Serial.print(demoLeak ? 1 : 0);
+    Serial.print("\t");
+    Serial.print("LeakLevel:");
+    Serial.print((int)instantLeakLevel);
+    Serial.print("\t");
+    Serial.print("CandidateLeak:");
+    Serial.print(candidateLeak ? 1 : 0);
+    Serial.print("\t");
+    Serial.print("RequiredCount:");
+    Serial.print(requiredConsecutive);
+    Serial.print("\t");
+    Serial.print("FinalLeak:");
+    Serial.print(leakDetected ? 1 : 0);
+    Serial.print("\t");
+    Serial.print("DisplayLeak:");
+    Serial.print(displayLeak ? 1 : 0);
+    Serial.print("\t");
+    Serial.print("DisplayLevel:");
+    Serial.print((int)displayedLeakLevel);
+    Serial.print("\t");
+    Serial.print("AlarmLevel:");
+    Serial.print((int)alarmedLeakLevel);
+    Serial.print("\t");
+    Serial.print("LED:");
+    Serial.print(displayLeak ? 1 : 0);
+    Serial.print("\t");
+    Serial.print("LEDColor:");
+    Serial.println(leakLevelColorName(outputLeakLevel));
+#endif
+    lastPrintMs = millis();
+  }
+}
+void setup() {
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println("BUILD: Clamp02 leak_tune_2026-04-30-r4");
+  Serial.print("PROFILE: ");
+  Serial.println(DEVICE_PROFILE_NAME);
+  Serial.print("DISPLAY: ");
+  Serial.println(PRESENTATION_NODE_LABEL);
+  Serial.println("TIMER: serial:t/time/timer");
+  Serial.println("CFG: assist_spec=2200 assist_zcr=0.14 burst_confirm=2 large_spec=2200 large_zcr=0.14");
+  Serial.println("CFG2: alarm_latch=10000 quiet_clear=5000");
+#if USE_RGB_LEAK_LED
+  pinMode(RGB_RED_PIN, OUTPUT);
+  pinMode(RGB_GREEN_PIN, OUTPUT);
+  pinMode(RGB_BLUE_PIN, OUTPUT);
+#else
+  pinMode(SMALL_LED_PIN, OUTPUT);
+#if USE_LEAK_LEVEL_LEDS
+  pinMode(MEDIUM_LED_PIN, OUTPUT);
+  pinMode(LARGE_LED_PIN, OUTPUT);
+#endif
+#endif
+  setLeakOutputs(LEAK_LEVEL_NONE);
+#if USE_VIBRATION_ASSIST
+#if VIBRATION_SENSOR_IS_PIEZO
+  pinMode(VIBRATION_PIN, INPUT_PULLDOWN);
+#if defined(ESP32)
+  analogReadResolution(12);
+#endif
+  Serial.println("Calibrating vibration baseline...");
+  calibrateVibrationBaseline();
+  Serial.print("Vibration baseline: ");
+  Serial.println(vibrationBaseline);
+#else
+  pinMode(GY61_X_PIN, INPUT);
+  pinMode(GY61_Y_PIN, INPUT);
+  pinMode(GY61_Z_PIN, INPUT);
+#if defined(ESP32)
+  analogReadResolution(12);
+#if defined(ADC_11db)
+  analogSetPinAttenuation(GY61_X_PIN, ADC_11db);
+  analogSetPinAttenuation(GY61_Y_PIN, ADC_11db);
+  analogSetPinAttenuation(GY61_Z_PIN, ADC_11db);
+#endif
+#endif
+  Serial.println("Calibrating GY-61 baseline...");
+  calibrateVibrationBaseline();
+  Serial.print("GY-61 baseline XYZ: ");
+  Serial.print(gy61Baseline[0]);
+  Serial.print("/");
+  Serial.print(gy61Baseline[1]);
+  Serial.print("/");
+  Serial.println(gy61Baseline[2]);
+#endif
+#endif
+  setupI2CBus();
+  setupDisplay();
+  setupEnvironmentSensor();
+  setupMic();
+  setupModel();
+  presentationClockStartMs = millis();
+#if ENABLE_AWS_IOT
+  connectAWS();
+#endif
+  Serial.println("Leak detector ready");
+#if USE_RGB_LEAK_LED
+  Serial.println("LEDs: green=on, red=small, yellow=medium, blue=large");
+#elif USE_LEAK_LEVEL_LEDS
+  Serial.println("LED levels: small, medium, large");
+#else
+  Serial.println("Single leak LED enabled");
+#endif
+#if USE_VIBRATION_ASSIST
+#if VIBRATION_SENSOR_IS_PIEZO
+  Serial.println("Fusion: audio + vibration");
+#else
+  Serial.println("Fusion: audio + vibration (GY-61)");
+#endif
+#else
+  Serial.println("Fusion: audio only");
+#endif
+#if USE_OLED_DISPLAY
+  if (oledDisplayReady) {
+    Serial.print("OLED: ready @ 0x");
+    if (oledI2CAddressInUse < 16) {
+      Serial.print("0");
+    }
+    Serial.println(oledI2CAddressInUse, HEX);
+  } else {
+    Serial.println("OLED: init failed");
+  }
+#else
+  Serial.println("OLED: disabled");
+#endif
+#if USE_BME680_ENV_SENSOR
+  Serial.println(envSensorReady ? "BME680: ready" : "BME680: init failed");
+#else
+  Serial.println("BME680: library missing");
+#endif
+#if ENABLE_AWS_IOT
+  Serial.println("AWS: enabled");
+#else
+  Serial.println("AWS: local-only mode");
+#endif
+  Serial.println();
+}
+void loop() {
+  if (handleSerialCommands()) {
+    delay(5);
+    return;
+  }
+#if ENABLE_AWS_IOT
+  if (!client.connected()) {
+    connectAWS();
+  }
+  client.loop();
+#endif
+  runLiveModel();
+  delay(5);
+}
+
